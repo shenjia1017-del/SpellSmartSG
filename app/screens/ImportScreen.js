@@ -56,8 +56,15 @@ export default function ImportScreen({ navigation }) {
     setSaving(true);
     setErrorMsg(null);
     try {
-      // Assumes your `words` table uses a `word` column.
-      const { error } = await supabase.from('words').insert({ word: trimmed });
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData?.session?.user?.id;
+      if (!userId) {
+        setErrorMsg('You must be logged in to save words.');
+        return;
+      }
+
+      // Assumes your `words` table uses `word` and `user_id` columns.
+      const { error } = await supabase.from('words').insert({ word: trimmed, user_id: userId });
       if (error) throw error;
 
       setWordInput('');

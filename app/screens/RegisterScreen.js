@@ -1,42 +1,16 @@
-import React, { useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import React, { useState } from 'react';
+import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 import { supabase } from '../../lib/supabase';
 
-export default function LoginScreen({ navigation }) {
+export default function RegisterScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState(null);
 
-  useEffect(() => {
-    let isActive = true;
-
-    (async () => {
-      try {
-        const { data } = await supabase.auth.getSession();
-        if (isActive && data?.session) {
-          navigation.replace('Home');
-        }
-      } catch {
-        // Ignore and allow user to manually login.
-      }
-    })();
-
-    return () => {
-      isActive = false;
-    };
-  }, [navigation]);
-
-  const onLogin = async () => {
+  const onRegister = async () => {
     const trimmedEmail = email.trim();
     const trimmedPassword = password;
 
@@ -45,24 +19,26 @@ export default function LoginScreen({ navigation }) {
       return;
     }
 
-    if (!trimmedPassword) {
-      setErrorMsg('Please enter your password.');
+    if (trimmedPassword.length < 6) {
+      setErrorMsg('Password must be at least 6 characters.');
       return;
     }
 
     setLoading(true);
     setErrorMsg(null);
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { error } = await supabase.auth.signUp({
         email: trimmedEmail,
         password: trimmedPassword,
       });
 
       if (error) throw error;
 
-      navigation.replace('Home');
+      // Supabase may require email confirmation depending on project settings.
+      // After successful signUp, guide users back to login.
+      navigation.navigate('Login');
     } catch (e) {
-      setErrorMsg(e?.message ?? 'Failed to log in.');
+      setErrorMsg(e?.message ?? 'Failed to register.');
     } finally {
       setLoading(false);
     }
@@ -70,8 +46,7 @@ export default function LoginScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>SpellSmart SG</Text>
-      <Text style={styles.subtitle}>Log in to your account</Text>
+      <Text style={styles.title}>Create Account</Text>
 
       <Text style={styles.label}>Email</Text>
       <TextInput
@@ -97,16 +72,12 @@ export default function LoginScreen({ navigation }) {
 
       {errorMsg ? <Text style={styles.errorText}>{errorMsg}</Text> : null}
 
-      <TouchableOpacity style={styles.button} onPress={onLogin} disabled={loading}>
-        {loading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>Log In</Text>
-        )}
+      <TouchableOpacity style={styles.button} onPress={onRegister} disabled={loading}>
+        <Text style={styles.buttonText}>{loading ? 'Registering...' : 'Register'}</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.linkButton} onPress={() => navigation.navigate('Register')}>
-        <Text style={styles.linkText}>New here? Create an account</Text>
+      <TouchableOpacity style={styles.linkButton} onPress={() => navigation.navigate('Login')}>
+        <Text style={styles.linkText}>Already have an account? Log in</Text>
       </TouchableOpacity>
     </View>
   );
@@ -121,15 +92,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   title: {
-    fontSize: 32,
+    fontSize: 30,
     fontWeight: 'bold',
     color: '#4A90E2',
-    marginBottom: 10,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 40,
+    marginBottom: 24,
   },
   label: {
     width: '100%',
@@ -154,10 +120,10 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   button: {
-    backgroundColor: '#4A90E2',
     width: '100%',
+    backgroundColor: '#4A90E2',
     paddingVertical: 14,
-    borderRadius: 25,
+    borderRadius: 12,
     alignItems: 'center',
     marginBottom: 14,
   },
@@ -175,3 +141,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+

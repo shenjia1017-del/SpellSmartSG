@@ -1,24 +1,20 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import React from 'react';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import HomeScreen from './screens/HomeScreen';
+import ImportScreen from './screens/ImportScreen';
+import LearnScreen from './screens/LearnScreen';
+import LoginScreen from './screens/LoginScreen';
 
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
+const Stack = createNativeStackNavigator();
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
-
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
+    <Stack.Navigator initialRouteName="Login">
+      <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
+      <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Home' }} />
+      <Stack.Screen name="Import" component={ImportScreen} options={{ title: 'Import Words' }} />
+      <Stack.Screen name="Learn" component={LearnScreen} options={{ title: 'Learn' }} />
+    </Stack.Navigator>
   );
 }

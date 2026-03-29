@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -314,7 +313,7 @@ export default function ImportScreen({ navigation }) {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
+    <View style={styles.container}>
       <Text style={styles.title}>Import Word List</Text>
 
       <TouchableOpacity style={styles.button} onPress={onTakePhoto}>
@@ -458,12 +457,13 @@ export default function ImportScreen({ navigation }) {
       >
         <Text style={styles.backText}>← Back</Text>
       </TouchableOpacity>
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
     alignItems: 'center',
     backgroundColor: '#fff',
     paddingTop: 70,

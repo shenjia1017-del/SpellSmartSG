@@ -26,6 +26,8 @@ export default function ImportScreen({ navigation }) {
   const [photoUri, setPhotoUri] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractedWords, setExtractedWords] = useState([]);
+  const [extractedPassage, setExtractedPassage] = useState('');
+  const [weekLabel, setWeekLabel] = useState('');
 
   const openAIApiKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
 
@@ -52,32 +54,54 @@ export default function ImportScreen({ navigation }) {
     return cleaned;
   };
 
-  const parseWordsFromOpenAIContent = (content) => {
+  const parseOcrFromOpenAIContent = (content) => {
+    const empty = { words: [], passage: '' };
+
+    const fromObject = (parsed) => {
+      if (!parsed || typeof parsed !== 'object') return empty;
+      const words = Array.isArray(parsed.words)
+        ? normalizeWords(parsed.words)
+        : Array.isArray(parsed)
+          ? normalizeWords(parsed)
+          : [];
+      const passageRaw =
+        typeof parsed.passage === 'string'
+          ? parsed.passage
+          : typeof parsed.dictation_passage === 'string'
+            ? parsed.dictation_passage
+            : '';
+      const passage = passageRaw.trim();
+      return { words, passage };
+    };
+
     try {
       const parsed = JSON.parse(content);
-      if (Array.isArray(parsed)) return normalizeWords(parsed);
-      if (Array.isArray(parsed?.words)) return normalizeWords(parsed.words);
+      const result = fromObject(parsed);
+      if (result.words.length || result.passage) return result;
     } catch {
-      // If content is not raw JSON, try to parse fenced/embedded JSON below.
+      // continue
     }
 
-    const jsonMatch = content.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (jsonMatch?.[0]) {
       try {
         const parsed = JSON.parse(jsonMatch[0]);
-        if (Array.isArray(parsed)) return normalizeWords(parsed);
-        if (Array.isArray(parsed?.words)) return normalizeWords(parsed.words);
+        const result = fromObject(parsed);
+        if (result.words.length || result.passage) return result;
       } catch {
-        // Ignore and fallback to line parsing.
+        // ignore
       }
     }
 
-    return normalizeWords(
-      content
-        .split('\n')
-        .map((line) => line.replace(/^[\-\d\.\)\s]+/, '').trim())
-        .filter(Boolean),
-    );
+    return {
+      words: normalizeWords(
+        content
+          .split('\n')
+          .map((line) => line.replace(/^[\-\d\.\)\s]+/, '').trim())
+          .filter(Boolean),
+      ),
+      passage: '',
+    };
   };
 
   const loadSavedWords = async () => {
@@ -94,7 +118,7 @@ export default function ImportScreen({ navigation }) {
     }
   };
 
-  const extractWordsFromImageWithOpenAI = async (base64Image) => {
+  const extractOcrFromImageWithOpenAI = async (base64Image) => {
     if (!openAIApiKey) {
       throw new Error('Missing EXPO_PUBLIC_OPENAI_API_KEY in .env');
     }
@@ -112,14 +136,18 @@ export default function ImportScreen({ navigation }) {
           {
             role: 'system',
             content:
-              'You extract spelling entries from photos of spelling lists. Return only JSON in this format: {"words":["entry1","entry2"]}. Preserve each full entry exactly as it appears, including multi-word phrases (for example: "round the corner", "squinted my eyes", "organising a contest"). Do not split phrases into single words. Keep original casing, remove punctuation-only entries, and avoid duplicates.',
+              'You read photos of primary-school spelling worksheets. Separate two kinds of text and return ONLY valid JSON with this exact shape: {"words":["..."],"passage":"..."}. ' +
+              '(1) words: numbered spelling list items only — each numbered line is one string entry; preserve full phrases exactly as printed (e.g. "round the corner"); do not split multi-word phrases; strip leading numbers/bullets from the stored text only; dedupe; omit empty strings. ' +
+              '(2) passage: the dictation paragraph(s) or continuous prose block(s) for reading/dictation — NOT the numbered list. If there is no dictation passage, use an empty string "". ' +
+              'Keep original spelling and casing from the image. No markdown, no explanation outside JSON.',
           },
           {
             role: 'user',
             content: [
               {
                 type: 'text',
-                text: 'Extract the complete spelling entries from this image. Each line/phrase in the list should remain one entry. Return strict JSON only: {"words":["..."]}. Do not split multi-word phrases.',
+                text:
+                  'Return strict JSON only: {"words":["entry1","entry2"],"passage":"full paragraph text or empty string"}. Put numbered spelling items in words; put the dictation story/paragraph in passage.',
               },
               {
                 type: 'image_url',
@@ -140,8 +168,7 @@ export default function ImportScreen({ navigation }) {
     }
 
     const content = payload?.choices?.[0]?.message?.content ?? '';
-    const words = parseWordsFromOpenAIContent(content);
-    return words;
+    return parseOcrFromOpenAIContent(content);
   };
 
   const onTakePhoto = async () => {
@@ -169,15 +196,17 @@ export default function ImportScreen({ navigation }) {
     }
 
     setPhotoUri(asset.uri ?? '');
+    setExtractedPassage('');
     setIsExtracting(true);
     try {
-      const words = await extractWordsFromImageWithOpenAI(asset.base64);
+      const { words, passage } = await extractOcrFromImageWithOpenAI(asset.base64);
       setExtractedWords(words);
-      if (!words.length) {
-        setErrorMsg('No words were detected. Please try another photo.');
+      setExtractedPassage(passage);
+      if (!words.length && !passage.trim()) {
+        setErrorMsg('No spelling list or dictation passage was detected. Please try another photo.');
       }
     } catch (e) {
-      setErrorMsg(e?.message ?? 'Failed to extract words from image.');
+      setErrorMsg(e?.message ?? 'Failed to extract content from image.');
     } finally {
       setIsExtracting(false);
     }
@@ -191,10 +220,18 @@ export default function ImportScreen({ navigation }) {
     setExtractedWords((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const onSaveExtractedWords = async () => {
+  const onSaveOcrReview = async () => {
+    const wl = weekLabel.trim();
+    if (!wl) {
+      setErrorMsg('Please enter a week label (e.g. Week 5).');
+      return;
+    }
+
     const confirmedWords = normalizeWords(extractedWords);
-    if (!confirmedWords.length) {
-      setErrorMsg('Please keep at least one word before saving.');
+    const passageText = extractedPassage.trim();
+
+    if (!confirmedWords.length && !passageText) {
+      setErrorMsg('Add at least one spelling entry or dictation passage before saving.');
       return;
     }
 
@@ -204,19 +241,36 @@ export default function ImportScreen({ navigation }) {
       const { data: sessionData } = await supabase.auth.getSession();
       const userId = sessionData?.session?.user?.id;
       if (!userId) {
-        setErrorMsg('You must be logged in to save words.');
+        setErrorMsg('You must be logged in to save.');
         return;
       }
 
-      const rows = confirmedWords.map((word) => ({ word, user_id: userId }));
-      const { error } = await supabase.from('words').insert(rows);
-      if (error) throw error;
+      if (confirmedWords.length) {
+        const rows = confirmedWords.map((word) => ({
+          word,
+          user_id: userId,
+          week_label: wl,
+        }));
+        const { error: wordsError } = await supabase.from('words').insert(rows);
+        if (wordsError) throw wordsError;
+      }
+
+      if (passageText) {
+        const { error: passageError } = await supabase.from('passages').insert({
+          user_id: userId,
+          body: passageText,
+          week_label: wl,
+        });
+        if (passageError) throw passageError;
+      }
 
       setExtractedWords([]);
+      setExtractedPassage('');
+      setWeekLabel('');
       await loadSavedWords();
       setShowManual(true);
     } catch (e) {
-      setErrorMsg(e?.message ?? 'Failed to save extracted words.');
+      setErrorMsg(e?.message ?? 'Failed to save words or passage.');
     } finally {
       setSaving(false);
     }
@@ -277,7 +331,7 @@ export default function ImportScreen({ navigation }) {
       {isExtracting ? (
         <View style={styles.processingBox}>
           <ActivityIndicator />
-          <Text style={styles.processingText}>Extracting words from image...</Text>
+          <Text style={styles.processingText}>Extracting spelling list and dictation passage...</Text>
         </View>
       ) : null}
 
@@ -285,36 +339,58 @@ export default function ImportScreen({ navigation }) {
         <Image source={{ uri: photoUri }} style={styles.previewImage} />
       ) : null}
 
-      {extractedWords.length ? (
+      {extractedWords.length > 0 || extractedPassage.trim().length > 0 ? (
         <View style={styles.extractedSection}>
-          <Text style={styles.manualTitle}>Review extracted words</Text>
-          {extractedWords.map((word, index) => (
-            <View key={`extracted-${index}`} style={styles.extractedRow}>
-              <TextInput
-                style={[styles.input, styles.extractedInput]}
-                value={word}
-                autoCapitalize="none"
-                autoCorrect={false}
-                onChangeText={(value) => onEditExtractedWord(index, value)}
-              />
-              <TouchableOpacity
-                style={styles.deleteWordButton}
-                onPress={() => onDeleteExtractedWord(index)}
-              >
-                <Text style={styles.deleteWordButtonText}>Delete</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
+          <Text style={styles.manualTitle}>Review before saving</Text>
 
-          <TouchableOpacity
-            style={styles.saveButton}
-            onPress={onSaveExtractedWords}
-            disabled={saving}
-          >
+          <Text style={styles.sectionLabel}>Week label</Text>
+          <TextInput
+            style={styles.input}
+            value={weekLabel}
+            placeholder="e.g. Week 5, Term 2"
+            onChangeText={setWeekLabel}
+          />
+
+          <Text style={styles.sectionLabel}>Spelling words & phrases</Text>
+          {extractedWords.length ? (
+            extractedWords.map((word, index) => (
+              <View key={`extracted-${index}`} style={styles.extractedRow}>
+                <TextInput
+                  style={[styles.input, styles.extractedInput]}
+                  value={word}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  onChangeText={(value) => onEditExtractedWord(index, value)}
+                />
+                <TouchableOpacity
+                  style={styles.deleteWordButton}
+                  onPress={() => onDeleteExtractedWord(index)}
+                >
+                  <Text style={styles.deleteWordButtonText}>Delete</Text>
+                </TouchableOpacity>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.hintText}>No list items detected — you can add words manually below or retake the photo.</Text>
+          )}
+
+          <Text style={styles.sectionLabel}>Dictation passage</Text>
+          <TextInput
+            style={[styles.input, styles.passageInput]}
+            value={extractedPassage}
+            multiline
+            textAlignVertical="top"
+            placeholder="Paragraph text from the worksheet (editable)"
+            onChangeText={setExtractedPassage}
+          />
+
+          {errorMsg ? <Text style={styles.errorText}>{errorMsg}</Text> : null}
+
+          <TouchableOpacity style={styles.saveButton} onPress={onSaveOcrReview} disabled={saving}>
             {saving ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.saveButtonText}>Save Confirmed Words</Text>
+              <Text style={styles.saveButtonText}>Save words & passage</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -333,7 +409,10 @@ export default function ImportScreen({ navigation }) {
             onChangeText={setWordInput}
           />
 
-          {errorMsg ? <Text style={styles.errorText}>{errorMsg}</Text> : null}
+          {errorMsg &&
+          !(extractedWords.length > 0 || extractedPassage.trim().length > 0) ? (
+            <Text style={styles.errorText}>{errorMsg}</Text>
+          ) : null}
 
           <TouchableOpacity style={styles.saveButton} onPress={onSaveWord} disabled={saving}>
             {saving ? (
@@ -420,6 +499,23 @@ const styles = StyleSheet.create({
   extractedSection: {
     marginTop: 20,
     width: '90%',
+  },
+  sectionLabel: {
+    alignSelf: 'stretch',
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#444',
+    marginBottom: 6,
+    marginTop: 8,
+  },
+  hintText: {
+    color: '#888',
+    fontSize: 14,
+    marginBottom: 12,
+  },
+  passageInput: {
+    minHeight: 120,
+    marginBottom: 12,
   },
   extractedRow: {
     flexDirection: 'row',

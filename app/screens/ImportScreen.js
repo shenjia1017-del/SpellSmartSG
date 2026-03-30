@@ -3,11 +3,15 @@ import {
   ActivityIndicator,
   Image,
   InteractionManager,
+  KeyboardAvoidingView,
+  Keyboard,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
@@ -39,11 +43,14 @@ export default function ImportScreen({ navigation }) {
 
   const [savedWords, setSavedWords] = useState([]);
   const [photoUri, setPhotoUri] = useState('');
+  // Camera queue: photos added first, processed only when user taps "Process All Photos".
+  const [photoQueue, setPhotoQueue] = useState([]);
   const [pdfPreviewName, setPdfPreviewName] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractedWords, setExtractedWords] = useState([]);
   const [extractedPassage, setExtractedPassage] = useState('');
   const [weekLabel, setWeekLabel] = useState('');
+  const [saveSuccess, setSaveSuccess] = useState(null);
 
   const openAIApiKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
   const lastOcrAtRef = useRef(0);
@@ -371,8 +378,63 @@ export default function ImportScreen({ navigation }) {
     await runVisionOcrPipeline(base64, mime, uri ?? '');
   };
 
+  const processPhotoQueueWithOCR = async () => {
+    if (!photoQueue?.length) return;
+    setErrorMsg(null);
+    setIsExtracting(true);
+    setPdfPreviewName('');
+    setPhotoUri(photoQueue?.[0]?.uri ?? '');
+    setExtractedPassage('');
+    setExtractedWords([]);
+    try {
+      const allWordsRaw = [];
+      const passages = [];
+
+      for (const photo of photoQueue) {
+        if (!photo?.uri) continue;
+        let base64 = photo.base64;
+        if (!base64) {
+          try {
+            base64 = await FileSystem.readAsStringAsync(photo.uri, {
+              encoding: FileSystem.EncodingType.Base64,
+            });
+          } catch {
+            // Skip photos that can't be read as base64.
+            continue;
+          }
+        }
+        if (!base64) continue;
+
+        let mimeType = photo.mimeType;
+        if (!mimeType || !String(mimeType).startsWith('image/')) mimeType = 'image/jpeg';
+
+        await waitOcrRateLimit();
+        const result = await fetchOpenAIVisionOcr(base64, mimeType);
+        if (Array.isArray(result?.words)) allWordsRaw.push(...result.words);
+        if (typeof result?.passage === 'string' && result.passage.trim()) passages.push(result.passage.trim());
+      }
+
+      const mergedWords = normalizeWords(allWordsRaw);
+      const mergedPassage = passages.join('\n\n').trim();
+
+      setExtractedWords(mergedWords);
+      setExtractedPassage(mergedPassage);
+
+      if (!mergedWords.length && !mergedPassage) {
+        setErrorMsg('No spelling list or dictation passage was detected. Please try another photo.');
+      } else {
+        scheduleScrollToReviewSection();
+      }
+    } catch (e) {
+      setErrorMsg(e?.message ?? 'Failed to extract content from photos.');
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
   const onTakePhoto = async () => {
     setErrorMsg(null);
+    setSaveSuccess(null);
 
     try {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
@@ -391,10 +453,24 @@ export default function ImportScreen({ navigation }) {
       if (result.canceled) return;
 
       const asset = result.assets?.[0];
-      await processImageWithOCR(asset?.uri ?? '', {
-        base64: asset?.base64,
-        mimeType: 'image/jpeg',
-      });
+      if (!asset?.uri) {
+        setErrorMsg('Could not read photo data from the camera.');
+        return;
+      }
+
+      // Queue it; do not OCR yet.
+      setPdfPreviewName('');
+      setPhotoUri('');
+      setExtractedWords([]);
+      setExtractedPassage('');
+      setPhotoQueue((prev) => [
+        ...prev,
+        {
+          uri: asset.uri,
+          base64: asset.base64,
+          mimeType: 'image/jpeg',
+        },
+      ]);
     } catch (e) {
       setErrorMsg(e?.message ?? 'Failed to open camera.');
     }
@@ -402,6 +478,7 @@ export default function ImportScreen({ navigation }) {
 
   const onChooseFromLibrary = async () => {
     setErrorMsg(null);
+    setSaveSuccess(null);
 
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -412,21 +489,35 @@ export default function ImportScreen({ navigation }) {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
+        allowsMultipleSelection: true,
         quality: 0.8,
         base64: true,
       });
 
       if (result.canceled) return;
 
-      const asset = result.assets?.[0];
-      const uri = asset?.uri ?? '';
-      if (uri) setPhotoUri(uri);
-      console.log('Library image selected, starting OCR:', uri);
-      const mime =
-        asset.mimeType && String(asset.mimeType).startsWith('image/')
-          ? asset.mimeType
-          : 'image/jpeg';
-      await processImageWithOCR(uri, { base64: asset?.base64, mimeType: mime });
+      const assets = Array.isArray(result.assets) ? result.assets : [];
+      const queuedPhotos = assets
+        .filter((asset) => Boolean(asset?.uri))
+        .map((asset) => ({
+          uri: asset.uri,
+          base64: asset.base64,
+          mimeType:
+            asset.mimeType && String(asset.mimeType).startsWith('image/')
+              ? asset.mimeType
+              : 'image/jpeg',
+        }));
+
+      if (!queuedPhotos.length) {
+        setErrorMsg('Could not read image data from the photo.');
+        return;
+      }
+
+      setPdfPreviewName('');
+      setPhotoUri('');
+      setExtractedWords([]);
+      setExtractedPassage('');
+      setPhotoQueue((prev) => [...prev, ...queuedPhotos]);
     } catch (e) {
       setErrorMsg(e?.message ?? 'Failed to open photo library.');
     }
@@ -434,6 +525,7 @@ export default function ImportScreen({ navigation }) {
 
   const onUploadFromFiles = async () => {
     setErrorMsg(null);
+    setSaveSuccess(null);
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['image/*', 'application/pdf'],
@@ -481,7 +573,9 @@ export default function ImportScreen({ navigation }) {
   };
 
   const onSaveOcrReview = async () => {
+    Keyboard.dismiss();
     const wl = weekLabel.trim();
+    setSaveSuccess(null);
     if (!wl) {
       setErrorMsg('Please enter a week label (e.g. Week 5).');
       return;
@@ -505,14 +599,19 @@ export default function ImportScreen({ navigation }) {
         return;
       }
 
+      let insertedWordRows = [];
       if (confirmedWords.length) {
         const rows = confirmedWords.map((word) => ({
           word,
           user_id: userId,
           week_label: wl,
         }));
-        const { error: wordsError } = await supabase.from('words').insert(rows);
+        const { data: insertedData, error: wordsError } = await supabase
+          .from('words')
+          .insert(rows)
+          .select('id, word, user_id, week_label');
         if (wordsError) throw wordsError;
+        insertedWordRows = Array.isArray(insertedData) ? insertedData : [];
       }
 
       if (passageText) {
@@ -524,13 +623,11 @@ export default function ImportScreen({ navigation }) {
         if (passageError) throw passageError;
       }
 
-      setExtractedWords([]);
-      setExtractedPassage('');
-      setWeekLabel('');
-      setPhotoUri('');
-      setPdfPreviewName('');
-      await loadSavedWords();
-      setShowManual(true);
+      setSaveSuccess({
+        count: insertedWordRows.length,
+        weekLabel: wl,
+        words: insertedWordRows,
+      });
     } catch (e) {
       setErrorMsg(e?.message ?? 'Failed to save words or passage.');
     } finally {
@@ -576,7 +673,11 @@ export default function ImportScreen({ navigation }) {
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      onTouchStart={() => Keyboard.dismiss()}
+    >
       <ScrollView
         ref={scrollRef}
         style={styles.scroll}
@@ -586,9 +687,49 @@ export default function ImportScreen({ navigation }) {
       >
       <Text style={styles.title}>Import Word List</Text>
 
-      <TouchableOpacity style={styles.button} onPress={onTakePhoto}>
-        <Text style={styles.buttonText}>📷 Take a Photo</Text>
-      </TouchableOpacity>
+      {photoQueue.length > 0 ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.photoStrip}
+          contentContainerStyle={styles.photoStripContent}
+          keyboardShouldPersistTaps="handled"
+        >
+          {photoQueue.map((p, idx) => (
+            <View key={`${p.uri}-${idx}`} style={styles.thumbWrap}>
+              <Image source={{ uri: p.uri }} style={styles.thumbImage} />
+            </View>
+          ))}
+        </ScrollView>
+      ) : null}
+
+      {photoQueue.length === 0 ? (
+        <TouchableOpacity style={styles.button} onPress={onTakePhoto} disabled={isExtracting}>
+          <Text style={styles.buttonText}>📷 Take a Photo</Text>
+        </TouchableOpacity>
+      ) : (
+        <>
+          <TouchableOpacity
+            style={styles.button}
+            onPress={onTakePhoto}
+            disabled={isExtracting}
+          >
+            <Text style={styles.buttonText}>＋ Add Another Photo</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.button, styles.secondButton]}
+            onPress={processPhotoQueueWithOCR}
+            disabled={isExtracting}
+          >
+            {isExtracting ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>✅ Process All Photos</Text>
+            )}
+          </TouchableOpacity>
+        </>
+      )}
 
       <TouchableOpacity
         style={[styles.button, styles.secondButton]}
@@ -680,6 +821,27 @@ export default function ImportScreen({ navigation }) {
               <Text style={styles.saveButtonText}>Save words & passage</Text>
             )}
           </TouchableOpacity>
+
+          {saveSuccess ? (
+            <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
+              <View style={styles.successBox}>
+                <Text style={styles.successText}>✓ {saveSuccess.count} words saved!</Text>
+                <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
+                  <TouchableOpacity
+                    style={styles.successStartBtn}
+                    onPress={() =>
+                      navigation.navigate('Learn', {
+                        words: saveSuccess.words,
+                        weekLabel: saveSuccess.weekLabel,
+                      })
+                    }
+                  >
+                    <Text style={styles.successStartBtnText}>Start Learning →</Text>
+                  </TouchableOpacity>
+                </TouchableWithoutFeedback>
+              </View>
+            </TouchableWithoutFeedback>
+          ) : null}
         </View>
       ) : null}
 
@@ -742,7 +904,7 @@ export default function ImportScreen({ navigation }) {
         <Text style={styles.backText}>← Back</Text>
       </TouchableOpacity>
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -785,6 +947,31 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
+  },
+  photoStrip: {
+    width: '100%',
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  photoStripContent: {
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    gap: 12,
+  },
+  thumbWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 10,
+    backgroundColor: '#f4f4f4',
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#e4e4e4',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  thumbImage: {
+    width: '100%',
+    height: '100%',
   },
   manualSection: {
     marginTop: 25,
@@ -895,6 +1082,33 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   saveButtonText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  successBox: {
+    borderWidth: 1,
+    borderColor: '#7ED321',
+    backgroundColor: '#F1FAE8',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+  },
+  successText: {
+    color: '#2D7A16',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  successStartBtn: {
+    width: '100%',
+    alignItems: 'center',
+    backgroundColor: '#7ED321',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+  },
+  successStartBtnText: {
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',

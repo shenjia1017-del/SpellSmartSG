@@ -103,6 +103,21 @@ async function fetchClaudeCard(word) {
     throw new Error('Missing EXPO_PUBLIC_ANTHROPIC_API_KEY in .env');
   }
 
+  // Safety: Claude should always receive a plain string word.
+  if (typeof word !== 'string') {
+    console.error('[LearnScreen] Claude fetch: invalid word value (expected string):', word);
+    return {
+      definition: '—',
+      example: '—',
+      emoji: '📘',
+      practiceWord: '',
+      practicePhonics: '',
+      practiceGraphemes: '',
+      graphemesPronunciation: {},
+      definitions: [],
+    };
+  }
+
   console.log('[LearnScreen] Claude request for word:', word, 'model:', CLAUDE_MODEL);
 
   const prompt = `You help Singapore primary school students (P1–P6) learn spelling.
@@ -231,7 +246,8 @@ export default function LearnScreen({ navigation, route }) {
   const lastClaudeAt = useRef(0);
   const lastTtsAt = useRef(0);
 
-  const currentWord = words[index]?.word ?? '';
+  const wordString = typeof words[index] === 'string' ? words[index] : words[index]?.word ?? '';
+  const currentWord = typeof wordString === 'string' ? wordString : '';
 
   const [card, setCard] = useState({
     definition: '',
@@ -277,6 +293,17 @@ export default function LearnScreen({ navigation, route }) {
       setLoadingList(true);
       setErrorMsg(null);
       try {
+        const passedWordsRaw = route.params?.words;
+        const passedWords = Array.isArray(passedWordsRaw)
+          ? passedWordsRaw
+              .filter(Boolean)
+              .map((w) =>
+                typeof w === 'string' ? { id: null, word: w, learn_card_json: null } : w,
+              )
+          : [];
+
+        console.log('[LearnScreen] First word raw:', JSON.stringify(passedWords[0]));
+
         const { data: sessionData } = await supabase.auth.getSession();
         const uid = sessionData?.session?.user?.id;
         if (!uid) {
@@ -288,29 +315,32 @@ export default function LearnScreen({ navigation, route }) {
         }
         if (!cancelled) setUserId(uid);
 
-        let query = supabase.from('words').select('id, word, learn_card_json').eq('user_id', uid);
-        let { data, error } = await query.order('created_at', { ascending: true });
+        let list = passedWords;
+        if (list.length === 0) {
+          let query = supabase.from('words').select('id, word, learn_card_json').eq('user_id', uid);
+          let { data, error } = await query.order('created_at', { ascending: true });
 
-        if (error) {
-          const retry = await supabase
-            .from('words')
-            .select('id, word, learn_card_json')
-            .eq('user_id', uid)
-            .order('id', { ascending: true });
-          data = retry.data;
-          error = retry.error;
+          if (error) {
+            const retry = await supabase
+              .from('words')
+              .select('id, word, learn_card_json')
+              .eq('user_id', uid)
+              .order('id', { ascending: true });
+            data = retry.data;
+            error = retry.error;
+          }
+
+          if (error) throw error;
+
+          const rows = Array.isArray(data) ? data : [];
+          list = rows
+            .map((r) => ({
+              id: r.id,
+              word: String(r.word ?? '').trim(),
+              learn_card_json: r.learn_card_json ?? null,
+            }))
+            .filter((r) => r.word.length > 0);
         }
-
-        if (error) throw error;
-
-        const rows = Array.isArray(data) ? data : [];
-        const list = rows
-          .map((r) => ({
-            id: r.id,
-            word: String(r.word ?? '').trim(),
-            learn_card_json: r.learn_card_json ?? null,
-          }))
-          .filter((r) => r.word.length > 0);
 
         if (!cancelled) {
           setWords(list);
@@ -329,7 +359,7 @@ export default function LearnScreen({ navigation, route }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [route.params?.words]);
 
   useEffect(() => {
     if (!currentWord || !userId) {
@@ -430,7 +460,7 @@ export default function LearnScreen({ navigation, route }) {
       setErrorMsg(null);
       try {
         lastClaudeAt.current = Date.now();
-        const content = await fetchClaudeCard(wordKey);
+        const content = await fetchClaudeCard(currentWord);
         if (cancelled) return;
         cacheRef.current.set(wordKey, content);
         setCard(content);
@@ -527,6 +557,7 @@ export default function LearnScreen({ navigation, route }) {
   const goPractice = () => {
     if (!card.practiceWord) return;
     navigation.navigate('Practice', {
+      word: currentWord,
       practiceWord: card.practiceWord,
       practicePhonics: card.practicePhonics,
       practiceGraphemes: ensureDistinctGraphemes(
@@ -536,6 +567,7 @@ export default function LearnScreen({ navigation, route }) {
       ),
       graphemesPronunciation: card.graphemesPronunciation ?? {},
       definitions: card.definitions ?? [],
+      exampleSentence: card.example ?? '',
     });
   };
 

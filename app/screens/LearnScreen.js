@@ -1,3 +1,4 @@
+import { useFocusEffect } from '@react-navigation/native';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -10,6 +11,8 @@ import {
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 
+import { ensurePhonemeClipsInStorage } from '../../lib/phonemeStorage';
+import { fetchOpenAITtsAudio, splitPhonicsToSyllables } from '../../lib/phonics';
 import { supabase } from '../../lib/supabase';
 
 const CLAUDE_MIN_INTERVAL_MS = 2000;
@@ -18,7 +21,6 @@ const TTS_MIN_INTERVAL_MS = 800;
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 
 const anthropicKey = process.env.EXPO_PUBLIC_ANTHROPIC_API_KEY;
-const openAIKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
 
 function parseClaudeJson(text) {
   const trimmed = String(text ?? '').trim();
@@ -38,15 +40,60 @@ function parseClaudeJson(text) {
   throw new Error('Could not parse learning content from Claude.');
 }
 
-function arrayBufferToBase64(buffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+const ALLOWED_DEF_TYPES = new Set(['verb', 'noun', 'adjective', 'adverb']);
+
+function normalizeDefinitions(parsed) {
+  const raw = Array.isArray(parsed?.definitions) ? parsed.definitions : [];
+  return raw
+    .map((d) => ({
+      type: String(d?.type ?? '')
+        .toLowerCase()
+        .trim(),
+      meaning: String(d?.meaning ?? '')
+        .trim(),
+    }))
+    .filter((d) => ALLOWED_DEF_TYPES.has(d.type) && d.meaning)
+    .slice(0, 3);
+}
+
+/** Keep only entries whose keys match practiceGraphemes segments (after " • "). */
+function normalizeGraphemesPronunciation(parsed, practiceGraphemes) {
+  const groups = splitPhonicsToSyllables(practiceGraphemes);
+  const raw = parsed?.graphemesPronunciation;
+  const out = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const g of groups) {
+    const key = String(g).trim();
+    if (!key) continue;
+    const val = raw[key] ?? raw[key.toLowerCase()];
+    if (typeof val === 'string' && val.trim()) {
+      out[key] = val.trim();
+    }
   }
-  // eslint-disable-next-line no-undef
-  return btoa(binary);
+  return out;
+}
+
+function derivePracticeWordFallback(display) {
+  const t = String(display ?? '').trim();
+  if (!t.includes(' ')) return t;
+  const parts = t.split(/\s+/).filter(Boolean);
+  if (!parts.length) return t;
+  return [...parts].sort((a, b) => b.length - a.length)[0];
+}
+
+/** Syllable vs grapheme strings must differ; missing/duplicate graphemes fall back to per-letter split. */
+function ensureDistinctGraphemes(practiceWord, practicePhonics, practiceGraphemes) {
+  const w = String(practiceWord ?? '').trim();
+  const pp = String(practicePhonics ?? '').trim();
+  let pg = String(practiceGraphemes ?? '').trim();
+  if (!pg || pg === '—') {
+    pg = w.split('').join(' • ');
+  }
+  const compact = (s) => String(s).replace(/\s/g, '');
+  if (w.length > 1 && compact(pg) === compact(pp)) {
+    return w.split('').join(' • ');
+  }
+  return pg;
 }
 
 async function fetchClaudeCard(word) {
@@ -63,10 +110,23 @@ async function fetchClaudeCard(word) {
 For this exact spelling entry (may be a single word or a phrase): ${JSON.stringify(word)}
 
 Return ONLY valid JSON with these keys (no markdown, no extra text):
-- "phonics": syllable breakdown using bullet " • " between parts, e.g. "e • NOR • mous" or "round • the • cor • ner". Use simple sounds suitable for kids.
+- "phonics": syllable breakdown using bullet " • " between parts for the full entry (for reference only in your reasoning).
 - "definition": one short English definition a child can understand (one or two sentences max).
 - "example": one example sentence using the word or phrase naturally, in quotes in the string value only if you like.
 - "emoji": exactly one Unicode emoji that fits the meaning (not multiple).
+- "practiceWord": If the entry is a multi-word phrase, the single hardest or key spelling word to practice (copy spelling exactly as it appears inside the phrase). If the entry is already one word, use that exact same word.
+- "practicePhonics": SYLLABLE breakdown by rhythm/beat for practiceWord ONLY (used in the Syllables activity). Use " • " between spoken syllables. Examples: "approached" → "ap • proached", "getting" → "get • ting", "enormous" → "e • nor • mous". The segments joined must spell practiceWord exactly (ignore spaces around bullets).
+- "practiceGraphemes": PHONICS sound breakdown for practiceWord ONLY (used in the Phonics activity). Split by real sound units following English phonics rules, using " • " between parts. Examples: "approached" → "a • pp • r • oa • ch • ed", "getting" → "g • e • tt • i • ng", "enormous" → "e • n • or • m • ou • s". The segments joined must spell practiceWord exactly.
+- CRITICAL: practicePhonics and practiceGraphemes MUST always be different from each other. Never output the same string for both. Syllable beats are fewer chunks than phonics sound units (except rare edge cases); if unsure, use more splits in practiceGraphemes than in practicePhonics.
+- "graphemesPronunciation": object mapping each key from practiceGraphemes (split by " • ") to the EXACT text that text-to-speech should speak to produce the correct phonics sound for that grapheme (not IPA; use simple English spellings). Keys must be exactly those segment strings. Follow these rules for the values:
+  • Single consonants: add "uh" after the letter sound (b→"buh", p→"puh", t→"tuh", d→"duh", and similarly for other single consonants).
+  • Vowels: use the SHORT vowel sound (a→"ah", e→"eh", i→"ih", o→"oh", u→"uh").
+  • Digraphs: sh→"shh", ch→"chh", th→"thh", ck→"k", ph→"fff", ng→"ing".
+  • Vowel teams: oa→"oh", ai→"ay", ee→"eee", ou→"ow", oi→"oy".
+  • R-controlled: ar→"arr", er→"err", or→"orr".
+  • Multi-letter chunks: give natural spoken pronunciation (e.g. tion→"shun", ture→"cher").
+  • NEVER use letter names: never "pee" for p, never "tee" for t, never "ess" for s—always phonics-style sounds as above.
+- "definitions": array of up to 3 objects. ONLY use word types: "verb", "noun", "adjective", "adverb". Each object: {"type":"verb"|"noun"|"adjective"|"adverb","meaning":"short child-friendly English definition for that sense"}. Include only types that genuinely apply to practiceWord.
 
 Keep vocabulary simple. British English spelling is fine when it matches the entry.`;
 
@@ -130,42 +190,34 @@ Keep vocabulary simple. British English spelling is fine when it matches the ent
 
   console.log('[LearnScreen] Claude card JSON parsed OK:', parsed);
 
+  const displayEntry = String(word ?? '').trim();
+  let practiceWord = String(parsed.practiceWord ?? '').trim();
+  if (!practiceWord) {
+    practiceWord = derivePracticeWordFallback(displayEntry);
+  }
+  let practicePhonics = String(parsed.practicePhonics ?? '').trim();
+  if (!practicePhonics || practicePhonics === '—') {
+    practicePhonics = practiceWord;
+  }
+  let practiceGraphemes = String(parsed.practiceGraphemes ?? '').trim();
+  practiceGraphemes = ensureDistinctGraphemes(practiceWord, practicePhonics, practiceGraphemes);
+
+  const definitions = normalizeDefinitions(parsed);
+  const graphemesPronunciation = normalizeGraphemesPronunciation(parsed, practiceGraphemes);
+
   return {
-    phonics: String(parsed.phonics ?? '').trim() || '—',
     definition: String(parsed.definition ?? '').trim() || '—',
     example: String(parsed.example ?? '').trim() || '—',
     emoji: String(parsed.emoji ?? '').trim() || '📘',
+    practiceWord,
+    practicePhonics,
+    practiceGraphemes,
+    graphemesPronunciation,
+    definitions,
   };
 }
 
-async function fetchOpenAITtsAudio(word) {
-  if (!openAIKey) {
-    throw new Error('Missing EXPO_PUBLIC_OPENAI_API_KEY in .env');
-  }
-
-  const response = await fetch('https://api.openai.com/v1/audio/speech', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${openAIKey}`,
-    },
-    body: JSON.stringify({
-      model: 'tts-1',
-      voice: 'alloy',
-      input: word,
-    }),
-  });
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err?.error?.message ?? 'OpenAI TTS request failed.');
-  }
-
-  const arrayBuffer = await response.arrayBuffer();
-  return arrayBufferToBase64(arrayBuffer);
-}
-
-export default function LearnScreen({ navigation }) {
+export default function LearnScreen({ navigation, route }) {
   const [userId, setUserId] = useState(null);
   const [words, setWords] = useState([]);
   const [index, setIndex] = useState(0);
@@ -182,10 +234,14 @@ export default function LearnScreen({ navigation }) {
   const currentWord = words[index]?.word ?? '';
 
   const [card, setCard] = useState({
-    phonics: '',
     definition: '',
     example: '',
     emoji: '📘',
+    practiceWord: '',
+    practicePhonics: '',
+    practiceGraphemes: '',
+    graphemesPronunciation: {},
+    definitions: [],
   });
 
   const unloadSound = useCallback(async () => {
@@ -205,6 +261,15 @@ export default function LearnScreen({ navigation }) {
     };
   }, [unloadSound]);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (route.params?.advanceToNextWord && words.length > 0) {
+        setIndex((i) => Math.min(words.length - 1, i + 1));
+        navigation.setParams({ advanceToNextWord: undefined });
+      }
+    }, [route.params?.advanceToNextWord, navigation, words.length]),
+  );
+
   useEffect(() => {
     let cancelled = false;
 
@@ -223,13 +288,13 @@ export default function LearnScreen({ navigation }) {
         }
         if (!cancelled) setUserId(uid);
 
-        let query = supabase.from('words').select('id, word').eq('user_id', uid);
+        let query = supabase.from('words').select('id, word, learn_card_json').eq('user_id', uid);
         let { data, error } = await query.order('created_at', { ascending: true });
 
         if (error) {
           const retry = await supabase
             .from('words')
-            .select('id, word')
+            .select('id, word, learn_card_json')
             .eq('user_id', uid)
             .order('id', { ascending: true });
           data = retry.data;
@@ -240,7 +305,11 @@ export default function LearnScreen({ navigation }) {
 
         const rows = Array.isArray(data) ? data : [];
         const list = rows
-          .map((r) => ({ id: r.id, word: String(r.word ?? '').trim() }))
+          .map((r) => ({
+            id: r.id,
+            word: String(r.word ?? '').trim(),
+            learn_card_json: r.learn_card_json ?? null,
+          }))
           .filter((r) => r.word.length > 0);
 
         if (!cancelled) {
@@ -264,15 +333,88 @@ export default function LearnScreen({ navigation }) {
 
   useEffect(() => {
     if (!currentWord || !userId) {
-      setCard({ phonics: '', definition: '', example: '', emoji: '📘' });
+      setCard({
+        definition: '',
+        example: '',
+        emoji: '📘',
+        practiceWord: '',
+        practicePhonics: '',
+        practiceGraphemes: '',
+        graphemesPronunciation: {},
+        definitions: [],
+      });
       return;
     }
 
     const cached = cacheRef.current.get(currentWord);
     if (cached) {
-      setCard(cached);
+      const pw = cached.practiceWord ?? derivePracticeWordFallback(currentWord);
+      const pp = cached.practicePhonics && cached.practicePhonics !== '—' ? cached.practicePhonics : pw;
+      const pgr = ensureDistinctGraphemes(
+        pw,
+        pp,
+        cached.practiceGraphemes && String(cached.practiceGraphemes).trim() && cached.practiceGraphemes !== '—'
+          ? String(cached.practiceGraphemes).trim()
+          : '',
+      );
+      const defs = Array.isArray(cached.definitions) ? cached.definitions : [];
+      const gp =
+        cached.graphemesPronunciation &&
+        typeof cached.graphemesPronunciation === 'object' &&
+        !Array.isArray(cached.graphemesPronunciation)
+          ? cached.graphemesPronunciation
+          : {};
+      setCard({
+        ...cached,
+        practiceWord: pw,
+        practicePhonics: pp,
+        practiceGraphemes: pgr,
+        definitions: defs,
+        graphemesPronunciation: gp,
+      });
+      if (pgr) {
+        void ensurePhonemeClipsInStorage(pgr, gp);
+      }
       return;
     }
+
+    const row = words[index];
+    const dbCard = row?.learn_card_json;
+    if (dbCard && typeof dbCard === 'object' && String(dbCard.practiceWord || '').trim() && String(dbCard.practicePhonics || '').trim()) {
+      const pw = String(dbCard.practiceWord).trim();
+      const pp = String(dbCard.practicePhonics).trim() !== '—' ? String(dbCard.practicePhonics).trim() : pw;
+      const pgr = ensureDistinctGraphemes(
+        pw,
+        pp,
+        dbCard.practiceGraphemes && String(dbCard.practiceGraphemes).trim() && String(dbCard.practiceGraphemes).trim() !== '—'
+          ? String(dbCard.practiceGraphemes).trim()
+          : '',
+      );
+      const defs = Array.isArray(dbCard.definitions) ? dbCard.definitions : [];
+      const gp =
+        dbCard.graphemesPronunciation &&
+        typeof dbCard.graphemesPronunciation === 'object' &&
+        !Array.isArray(dbCard.graphemesPronunciation)
+          ? dbCard.graphemesPronunciation
+          : {};
+      const normalized = {
+        definition: String(dbCard.definition ?? '').trim() || '—',
+        example: String(dbCard.example ?? '').trim() || '—',
+        emoji: String(dbCard.emoji ?? '').trim() || '📘',
+        practiceWord: pw,
+        practicePhonics: pp,
+        practiceGraphemes: pgr,
+        definitions: defs,
+        graphemesPronunciation: gp,
+      };
+      setCard(normalized);
+      cacheRef.current.set(currentWord, normalized);
+      void ensurePhonemeClipsInStorage(pgr, gp);
+      return;
+    }
+
+    const wordKey = currentWord;
+    const persistId = words[index]?.id;
 
     let cancelled = false;
 
@@ -288,20 +430,45 @@ export default function LearnScreen({ navigation }) {
       setErrorMsg(null);
       try {
         lastClaudeAt.current = Date.now();
-        const content = await fetchClaudeCard(currentWord);
+        const content = await fetchClaudeCard(wordKey);
         if (cancelled) return;
-        cacheRef.current.set(currentWord, content);
+        cacheRef.current.set(wordKey, content);
         setCard(content);
+        const pgr = ensureDistinctGraphemes(
+          content.practiceWord,
+          content.practicePhonics,
+          content.practiceGraphemes,
+        );
+        if (pgr) {
+          void ensurePhonemeClipsInStorage(pgr, content.graphemesPronunciation ?? {});
+        }
+        if (persistId) {
+          const { error: upErr } = await supabase
+            .from('words')
+            .update({ learn_card_json: content })
+            .eq('id', persistId);
+          if (upErr) {
+            console.warn('[LearnScreen] Failed to cache learn_card_json:', upErr);
+          } else {
+            setWords((prev) =>
+              prev.map((w) => (w.id === persistId ? { ...w, learn_card_json: content } : w)),
+            );
+          }
+        }
       } catch (e) {
         if (!cancelled) {
           console.error('[LearnScreen] Claude fetch failed (LearnScreen handler):', e);
           console.error('[LearnScreen] Claude fetch error message:', e?.message);
           setErrorMsg(e?.message ?? 'Failed to load card content.');
           setCard({
-            phonics: '—',
             definition: '—',
             example: '—',
             emoji: '📘',
+            practiceWord: '',
+            practicePhonics: '',
+            practiceGraphemes: '',
+            graphemesPronunciation: {},
+            definitions: [],
           });
         }
       } finally {
@@ -312,7 +479,7 @@ export default function LearnScreen({ navigation }) {
     return () => {
       cancelled = true;
     };
-  }, [currentWord, userId]);
+  }, [currentWord, userId, index, words]);
 
   const onPlayPronunciation = async () => {
     if (!currentWord || playing) return;
@@ -355,6 +522,21 @@ export default function LearnScreen({ navigation }) {
       setErrorMsg(e?.message ?? 'Could not play audio.');
       setPlaying(false);
     }
+  };
+
+  const goPractice = () => {
+    if (!card.practiceWord) return;
+    navigation.navigate('Practice', {
+      practiceWord: card.practiceWord,
+      practicePhonics: card.practicePhonics,
+      practiceGraphemes: ensureDistinctGraphemes(
+        card.practiceWord,
+        card.practicePhonics,
+        card.practiceGraphemes ?? '',
+      ),
+      graphemesPronunciation: card.graphemesPronunciation ?? {},
+      definitions: card.definitions ?? [],
+    });
   };
 
   const goPrev = () => {
@@ -439,20 +621,17 @@ export default function LearnScreen({ navigation }) {
           {playing ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.buttonText}>🔊 Pronunciation</Text>
+            <Text style={styles.buttonText}>Pronunciation</Text>
           )}
         </TouchableOpacity>
 
         {loadingCard ? (
           <View style={styles.loadingCard}>
             <ActivityIndicator color="#4A90E2" />
-            <Text style={styles.muted}>Preparing phonics & examples…</Text>
+            <Text style={styles.muted}>Loading definition and example…</Text>
           </View>
         ) : (
           <>
-            <Text style={styles.sectionLabel}>Phonics</Text>
-            <Text style={styles.phonics}>{card.phonics}</Text>
-
             <Text style={styles.sectionLabel}>Definition</Text>
             <Text style={styles.definition}>{card.definition}</Text>
 
@@ -462,6 +641,14 @@ export default function LearnScreen({ navigation }) {
         )}
 
         {errorMsg ? <Text style={styles.errorBanner}>{errorMsg}</Text> : null}
+
+        <TouchableOpacity
+          style={[styles.practiceNavBtn, (!card.practiceWord || loadingCard) && styles.practiceNavBtnDisabled]}
+          onPress={goPractice}
+          disabled={!card.practiceWord || loadingCard}
+        >
+          <Text style={styles.practiceNavBtnText}>Practice this word →</Text>
+        </TouchableOpacity>
       </ScrollView>
 
       <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
@@ -483,7 +670,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    paddingBottom: 16,
+    paddingBottom: 24,
   },
   centered: {
     justifyContent: 'center',
@@ -555,11 +742,6 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     marginTop: 10,
   },
-  phonics: {
-    fontSize: 20,
-    color: '#7ED321',
-    marginBottom: 4,
-  },
   definition: {
     fontSize: 17,
     color: '#333',
@@ -594,6 +776,22 @@ const styles = StyleSheet.create({
     color: '#c00',
     fontSize: 14,
     textAlign: 'center',
+  },
+  practiceNavBtn: {
+    marginTop: 28,
+    alignSelf: 'stretch',
+    backgroundColor: '#4A90E2',
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+  practiceNavBtnDisabled: {
+    opacity: 0.45,
+  },
+  practiceNavBtnText: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '800',
   },
   backButton: {
     alignSelf: 'center',

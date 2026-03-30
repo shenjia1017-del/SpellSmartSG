@@ -1,17 +1,33 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  FlatList,
   Image,
+  InteractionManager,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 
+import { extractTextFromPdfPage1Base64 } from '../../lib/pdfPage1Text';
 import { supabase } from '../../lib/supabase';
+
+const OCR_MIN_INTERVAL_MS = 2000;
+
+function guessImageMimeFromFileName(name) {
+  const n = String(name ?? '').toLowerCase();
+  if (n.endsWith('.png')) return 'image/png';
+  if (n.endsWith('.webp')) return 'image/webp';
+  if (n.endsWith('.gif')) return 'image/gif';
+  if (n.endsWith('.heic') || n.endsWith('.heif')) return 'image/heic';
+  if (n.endsWith('.jpg') || n.endsWith('.jpeg')) return 'image/jpeg';
+  return 'image/jpeg';
+}
 
 export default function ImportScreen({ navigation }) {
   const [showManual, setShowManual] = useState(false);
@@ -23,12 +39,46 @@ export default function ImportScreen({ navigation }) {
 
   const [savedWords, setSavedWords] = useState([]);
   const [photoUri, setPhotoUri] = useState('');
+  const [pdfPreviewName, setPdfPreviewName] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractedWords, setExtractedWords] = useState([]);
   const [extractedPassage, setExtractedPassage] = useState('');
   const [weekLabel, setWeekLabel] = useState('');
 
   const openAIApiKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+  const lastOcrAtRef = useRef(0);
+  const scrollRef = useRef(null);
+  const scrollToReviewPendingRef = useRef(false);
+
+  const scheduleScrollToReviewSection = () => {
+    scrollToReviewPendingRef.current = true;
+    InteractionManager.runAfterInteractions(() => {
+      setTimeout(() => {
+        if (scrollToReviewPendingRef.current) {
+          scrollToReviewPendingRef.current = false;
+          scrollRef.current?.scrollToEnd({ animated: true });
+        }
+      }, 400);
+    });
+  };
+
+  const onReviewSectionLayout = (e) => {
+    const y = e.nativeEvent.layout.y;
+    if (!scrollToReviewPendingRef.current) return;
+    scrollToReviewPendingRef.current = false;
+    InteractionManager.runAfterInteractions(() => {
+      scrollRef.current?.scrollTo({ y: Math.max(0, y - 16), animated: true });
+    });
+  };
+
+  const waitOcrRateLimit = async () => {
+    const now = Date.now();
+    const wait = OCR_MIN_INTERVAL_MS - (now - lastOcrAtRef.current);
+    if (wait > 0) {
+      await new Promise((r) => setTimeout(r, wait));
+    }
+    lastOcrAtRef.current = Date.now();
+  };
 
   const wordKey = useMemo(() => {
     // Prefer common column names; fall back to stringified row.
@@ -109,7 +159,9 @@ export default function ImportScreen({ navigation }) {
     try {
       const { data, error } = await supabase.from('words').select('*');
       if (error) throw error;
-      setSavedWords(Array.isArray(data) ? data : []);
+      const rows = Array.isArray(data) ? data : [];
+      console.log('Setting words:', rows);
+      setSavedWords(rows);
     } catch (e) {
       setErrorMsg(e?.message ?? 'Failed to load words.');
     } finally {
@@ -117,7 +169,13 @@ export default function ImportScreen({ navigation }) {
     }
   };
 
-  const extractOcrFromImageWithOpenAI = async (base64Image) => {
+  const WORKSHEET_SYSTEM_PROMPT =
+    'You read photos of primary-school spelling worksheets. Separate two kinds of text and return ONLY valid JSON with this exact shape: {"words":["..."],"passage":"..."}. ' +
+    '(1) words: numbered spelling list items only — each numbered line is one string entry; preserve full phrases exactly as printed (e.g. "round the corner"); do not split multi-word phrases; strip leading numbers/bullets from the stored text only; dedupe; omit empty strings. ' +
+    '(2) passage: the dictation paragraph(s) or continuous prose block(s) for reading/dictation — NOT the numbered list. If there is no dictation passage, use an empty string "". ' +
+    'Keep original spelling and casing from the source. No markdown, no explanation outside JSON.';
+
+  const fetchOpenAIVisionOcr = async (base64, mimeType = 'image/jpeg') => {
     if (!openAIApiKey) {
       throw new Error('Missing EXPO_PUBLIC_OPENAI_API_KEY in .env');
     }
@@ -134,11 +192,7 @@ export default function ImportScreen({ navigation }) {
         messages: [
           {
             role: 'system',
-            content:
-              'You read photos of primary-school spelling worksheets. Separate two kinds of text and return ONLY valid JSON with this exact shape: {"words":["..."],"passage":"..."}. ' +
-              '(1) words: numbered spelling list items only — each numbered line is one string entry; preserve full phrases exactly as printed (e.g. "round the corner"); do not split multi-word phrases; strip leading numbers/bullets from the stored text only; dedupe; omit empty strings. ' +
-              '(2) passage: the dictation paragraph(s) or continuous prose block(s) for reading/dictation — NOT the numbered list. If there is no dictation passage, use an empty string "". ' +
-              'Keep original spelling and casing from the image. No markdown, no explanation outside JSON.',
+            content: WORKSHEET_SYSTEM_PROMPT,
           },
           {
             role: 'user',
@@ -151,7 +205,7 @@ export default function ImportScreen({ navigation }) {
               {
                 type: 'image_url',
                 image_url: {
-                  url: `data:image/jpeg;base64,${base64Image}`,
+                  url: `data:${mimeType};base64,${base64}`,
                 },
               },
             ],
@@ -170,44 +224,251 @@ export default function ImportScreen({ navigation }) {
     return parseOcrFromOpenAIContent(content);
   };
 
-  const onTakePhoto = async () => {
-    setErrorMsg(null);
+  const tryOpenAIVisionOcr = async (base64, mimeType) => {
+    try {
+      return await fetchOpenAIVisionOcr(base64, mimeType);
+    } catch {
+      return null;
+    }
+  };
 
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permission.granted) {
-      setErrorMsg('Camera permission is required to take a photo.');
-      return;
+  const extractOcrFromPlainTextWithOpenAI = async (pageText) => {
+    if (!openAIApiKey) {
+      throw new Error('Missing EXPO_PUBLIC_OPENAI_API_KEY in .env');
     }
 
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'],
-      allowsEditing: false,
-      quality: 0.7,
-      base64: true,
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${openAIApiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        temperature: 0,
+        messages: [
+          {
+            role: 'system',
+            content: WORKSHEET_SYSTEM_PROMPT,
+          },
+          {
+            role: 'user',
+            content:
+              'Return strict JSON only: {"words":["entry1","entry2"],"passage":"full paragraph text or empty string"}. ' +
+              'The text below was extracted from page 1 of a worksheet PDF (line breaks may be imperfect). Infer the numbered spelling list and dictation passage from it.\n\n---\n' +
+              String(pageText ?? '').slice(0, 48000) +
+              '\n---',
+          },
+        ],
+      }),
     });
 
-    if (result.canceled) return;
-
-    const asset = result.assets?.[0];
-    if (!asset?.base64) {
-      setErrorMsg('Could not read image data from the captured photo.');
-      return;
+    const payload = await response.json();
+    if (!response.ok) {
+      const message = payload?.error?.message ?? 'OpenAI text request failed.';
+      throw new Error(message);
     }
 
-    setPhotoUri(asset.uri ?? '');
+    const content = payload?.choices?.[0]?.message?.content ?? '';
+    return parseOcrFromOpenAIContent(content);
+  };
+
+  const runVisionOcrPipeline = async (base64, mimeType, previewUri) => {
+    setPdfPreviewName('');
+    setPhotoUri(previewUri ?? '');
     setExtractedPassage('');
+    setErrorMsg(null);
     setIsExtracting(true);
     try {
-      const { words, passage } = await extractOcrFromImageWithOpenAI(asset.base64);
+      await waitOcrRateLimit();
+      const result = await fetchOpenAIVisionOcr(base64, mimeType);
+      console.log('OCR result:', JSON.stringify(result));
+      const words = Array.isArray(result?.words) ? result.words : [];
+      const passage = typeof result?.passage === 'string' ? result.passage : '';
+      console.log('Setting words:', words);
       setExtractedWords(words);
       setExtractedPassage(passage);
       if (!words.length && !passage.trim()) {
         setErrorMsg('No spelling list or dictation passage was detected. Please try another photo.');
+      } else {
+        scheduleScrollToReviewSection();
       }
     } catch (e) {
       setErrorMsg(e?.message ?? 'Failed to extract content from image.');
     } finally {
       setIsExtracting(false);
+    }
+  };
+
+  const runPdfOcrPipeline = async (base64Pdf, displayName) => {
+    setPdfPreviewName(displayName);
+    setPhotoUri('');
+    setExtractedPassage('');
+    setErrorMsg(null);
+    setIsExtracting(true);
+    try {
+      await waitOcrRateLimit();
+      let parsed = await tryOpenAIVisionOcr(base64Pdf, 'application/pdf');
+
+      const visionEmpty = !parsed || (!parsed.words.length && !String(parsed.passage ?? '').trim());
+      if (visionEmpty) {
+        const pageText = await extractTextFromPdfPage1Base64(base64Pdf);
+        if (!pageText.trim()) {
+          throw new Error(
+            'Could not read this PDF (Vision + text extract failed). Export page 1 as an image or use Take a Photo.',
+          );
+        }
+        await waitOcrRateLimit();
+        parsed = await extractOcrFromPlainTextWithOpenAI(pageText);
+      }
+
+      const pdfWords = Array.isArray(parsed?.words) ? parsed.words : [];
+      const pdfPassage = typeof parsed?.passage === 'string' ? parsed.passage : '';
+      console.log('OCR result:', JSON.stringify({ words: pdfWords, passage: pdfPassage }));
+      console.log('Setting words:', pdfWords);
+      setExtractedWords(pdfWords);
+      setExtractedPassage(pdfPassage);
+      if (!pdfWords.length && !pdfPassage.trim()) {
+        setErrorMsg('No spelling list or dictation passage was detected in the PDF.');
+      } else {
+        scheduleScrollToReviewSection();
+      }
+    } catch (e) {
+      setErrorMsg(e?.message ?? 'Failed to extract from PDF.');
+    } finally {
+      setIsExtracting(false);
+    }
+  };
+
+  /** Same OCR path for camera + library; falls back to reading base64 from uri if picker omits it. */
+  const processImageWithOCR = async (uri, opts = {}) => {
+    let base64 = opts.base64;
+    if (!base64 && uri) {
+      try {
+        base64 = await FileSystem.readAsStringAsync(uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+      } catch {
+        setErrorMsg('Could not read image data from the photo.');
+        return;
+      }
+    }
+    if (!base64) {
+      setErrorMsg('Could not read image data from the photo.');
+      return;
+    }
+    let mime =
+      opts.mimeType && String(opts.mimeType).startsWith('image/')
+        ? opts.mimeType
+        : 'image/jpeg';
+    // Picker often returns JPEG base64 while asset.mimeType is still image/heic — Vision data URL must match bytes.
+    if (
+      opts.base64 &&
+      (mime === 'image/heic' || mime === 'image/heif')
+    ) {
+      mime = 'image/jpeg';
+    }
+    await runVisionOcrPipeline(base64, mime, uri ?? '');
+  };
+
+  const onTakePhoto = async () => {
+    setErrorMsg(null);
+
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        setErrorMsg('Camera permission is required to take a photo.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        allowsEditing: false,
+        quality: 0.7,
+        base64: true,
+      });
+
+      if (result.canceled) return;
+
+      const asset = result.assets?.[0];
+      await processImageWithOCR(asset?.uri ?? '', {
+        base64: asset?.base64,
+        mimeType: 'image/jpeg',
+      });
+    } catch (e) {
+      setErrorMsg(e?.message ?? 'Failed to open camera.');
+    }
+  };
+
+  const onChooseFromLibrary = async () => {
+    setErrorMsg(null);
+
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        setErrorMsg('Photo library permission is required to choose a photo.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.8,
+        base64: true,
+      });
+
+      if (result.canceled) return;
+
+      const asset = result.assets?.[0];
+      const uri = asset?.uri ?? '';
+      if (uri) setPhotoUri(uri);
+      console.log('Library image selected, starting OCR:', uri);
+      const mime =
+        asset.mimeType && String(asset.mimeType).startsWith('image/')
+          ? asset.mimeType
+          : 'image/jpeg';
+      await processImageWithOCR(uri, { base64: asset?.base64, mimeType: mime });
+    } catch (e) {
+      setErrorMsg(e?.message ?? 'Failed to open photo library.');
+    }
+  };
+
+  const onUploadFromFiles = async () => {
+    setErrorMsg(null);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['image/*', 'application/pdf'],
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) return;
+
+      const asset = result.assets?.[0];
+      if (!asset?.uri) {
+        setErrorMsg('No file was selected.');
+        return;
+      }
+
+      const name = asset.name ?? 'file';
+      const mimeRaw = asset.mimeType ?? '';
+      const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      const isPdf =
+        mimeRaw === 'application/pdf' || String(name).toLowerCase().endsWith('.pdf');
+
+      if (isPdf) {
+        await runPdfOcrPipeline(base64, name);
+        return;
+      }
+
+      const imageMime =
+        mimeRaw && mimeRaw.startsWith('image/')
+          ? mimeRaw
+          : guessImageMimeFromFileName(name);
+      await runVisionOcrPipeline(base64, imageMime, asset.uri);
+    } catch (e) {
+      setErrorMsg(e?.message ?? 'Failed to read the selected file.');
     }
   };
 
@@ -266,6 +527,8 @@ export default function ImportScreen({ navigation }) {
       setExtractedWords([]);
       setExtractedPassage('');
       setWeekLabel('');
+      setPhotoUri('');
+      setPdfPreviewName('');
       await loadSavedWords();
       setShowManual(true);
     } catch (e) {
@@ -276,7 +539,7 @@ export default function ImportScreen({ navigation }) {
   };
 
   useEffect(() => {
-    // Load list when user chooses manual input mode.
+    // Load list when user chooses manual input mode (does not clear OCR extract state).
     if (showManual) loadSavedWords();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showManual]);
@@ -314,10 +577,28 @@ export default function ImportScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator
+      >
       <Text style={styles.title}>Import Word List</Text>
 
       <TouchableOpacity style={styles.button} onPress={onTakePhoto}>
         <Text style={styles.buttonText}>📷 Take a Photo</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.button, styles.secondButton]}
+        onPress={onChooseFromLibrary}
+      >
+        <Text style={styles.buttonText}>🖼️ Choose from Library</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={[styles.button, styles.filesButton]} onPress={onUploadFromFiles}>
+        <Text style={styles.buttonText}>📄 Upload from Files</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
@@ -338,8 +619,15 @@ export default function ImportScreen({ navigation }) {
         <Image source={{ uri: photoUri }} style={styles.previewImage} />
       ) : null}
 
+      {pdfPreviewName ? (
+        <View style={styles.pdfPreviewBox}>
+          <Text style={styles.pdfPreviewTitle}>📄 {pdfPreviewName}</Text>
+          <Text style={styles.pdfPreviewSub}>PDF — page 1 processed (Vision or text extract)</Text>
+        </View>
+      ) : null}
+
       {extractedWords.length > 0 || extractedPassage.trim().length > 0 ? (
-        <View style={styles.extractedSection}>
+        <View style={styles.extractedSection} onLayout={onReviewSectionLayout}>
           <Text style={styles.manualTitle}>Review before saving</Text>
 
           <Text style={styles.sectionLabel}>Week label</Text>
@@ -426,24 +714,20 @@ export default function ImportScreen({ navigation }) {
             {loadingWords ? <ActivityIndicator /> : null}
           </View>
 
-          <FlatList
-            style={styles.wordsList}
-            data={savedWords}
-            keyExtractor={(item) => String(wordKey(item))}
-            renderItem={({ item }) => {
+          <View style={styles.wordsList}>
+            {savedWords.map((item) => {
+              const key = String(wordKey(item));
               const word = item?.word ?? item?.text ?? item?.value ?? '';
               return (
-                <View style={styles.wordRow}>
+                <View key={key} style={styles.wordRow}>
                   <Text style={styles.wordText}>{word || '(unrecognized row)'}</Text>
                 </View>
               );
-            }}
-            ListEmptyComponent={
-              !loadingWords ? (
-                <Text style={styles.emptyText}>No words saved yet</Text>
-              ) : null
-            }
-          />
+            })}
+            {!loadingWords && savedWords.length === 0 ? (
+              <Text style={styles.emptyText}>No words saved yet</Text>
+            ) : null}
+          </View>
 
           <TouchableOpacity style={styles.backButton} onPress={() => setShowManual(false)}>
             <Text style={styles.backText}>← Back to options</Text>
@@ -457,6 +741,7 @@ export default function ImportScreen({ navigation }) {
       >
         <Text style={styles.backText}>← Back</Text>
       </TouchableOpacity>
+      </ScrollView>
     </View>
   );
 }
@@ -464,10 +749,16 @@ export default function ImportScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    alignItems: 'center',
     backgroundColor: '#fff',
+  },
+  scroll: {
+    flex: 1,
+    width: '100%',
+  },
+  scrollContent: {
+    alignItems: 'center',
     paddingTop: 70,
-    paddingBottom: 30,
+    paddingBottom: 40,
   },
   title: {
     fontSize: 28,
@@ -486,6 +777,9 @@ const styles = StyleSheet.create({
   },
   secondButton: {
     backgroundColor: '#7ED321',
+  },
+  filesButton: {
+    backgroundColor: '#F5A623',
   },
   buttonText: {
     color: '#fff',
@@ -553,6 +847,25 @@ const styles = StyleSheet.create({
     marginTop: 16,
     backgroundColor: '#f4f4f4',
   },
+  pdfPreviewBox: {
+    width: '90%',
+    marginTop: 16,
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: '#fff8ee',
+    borderWidth: 1,
+    borderColor: '#F5A623',
+  },
+  pdfPreviewTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#333',
+  },
+  pdfPreviewSub: {
+    marginTop: 6,
+    fontSize: 13,
+    color: '#666',
+  },
   manualTitle: {
     fontSize: 20,
     fontWeight: 'bold',
@@ -598,8 +911,7 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   wordsList: {
-    flexGrow: 0,
-    maxHeight: 280,
+    alignSelf: 'stretch',
     marginBottom: 10,
   },
   wordRow: {

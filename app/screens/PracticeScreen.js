@@ -20,7 +20,6 @@ import {
   PHONEME_BUCKET,
   PHONEME_TTS_SPEED,
   resolvePhonicsTtsInput,
-  splitPhonicsToSyllables,
   TTS_VOICE_PHONEME,
 } from '../../lib/phonics';
 import { supabase } from '../../lib/supabase';
@@ -72,6 +71,17 @@ function shuffleArray(arr) {
   }
   return a;
 }
+
+/** Learn card strings may use •, |, ｜, or - between segments (Claude varies). */
+function splitPracticePhonicsSegments(phonicsStr) {
+  if (!phonicsStr || phonicsStr === '—') return [];
+  return phonicsStr
+    .split(/[•|\uFF5C-]/)
+    .filter((item) => item.trim().length > 0)
+    .map((item) => item.trim());
+}
+
+const stripPipeDisplay = (text) => (text ? String(text).replace(/\|/g, '') : '');
 
 const SUCCESS_SOUND_URI =
   'https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3';
@@ -128,9 +138,9 @@ export default function PracticeScreen({ navigation, route }) {
   const [fillInCorrect, setFillInCorrect] = useState(false);
   const [fillInWrongIndex, setFillInWrongIndex] = useState(null);
 
-  /** Phonics tab tiles: ONLY `practiceGraphemes`, split by "•". */
+  /** Phonics tab tiles: ONLY `practiceGraphemes`, split by •, |, ｜, or -. */
   const phonicsGroups = useMemo(
-    () => splitPhonicsToSyllables(practiceGraphemes),
+    () => splitPracticePhonicsSegments(practiceGraphemes),
     [practiceGraphemes],
   );
 
@@ -258,8 +268,8 @@ export default function PracticeScreen({ navigation, route }) {
   }, [navigation]);
 
   const resetSyllables = useCallback(() => {
-    const list = splitPhonicsToSyllables(practicePhonics).length
-      ? splitPhonicsToSyllables(practicePhonics)
+    const list = splitPracticePhonicsSegments(practicePhonics).length
+      ? splitPracticePhonicsSegments(practicePhonics)
       : practiceWord
         ? [practiceWord]
         : [];
@@ -273,7 +283,7 @@ export default function PracticeScreen({ navigation, route }) {
   }, [practicePhonics, practiceWord]);
 
   const resetPhonics = useCallback(() => {
-    const gr = splitPhonicsToSyllables(practiceGraphemes);
+    const gr = splitPracticePhonicsSegments(practiceGraphemes);
     if (gr.length === 0) {
       setPhSlots([]);
       setPhPool([]);
@@ -424,7 +434,7 @@ export default function PracticeScreen({ navigation, route }) {
 
   const checkSyllables = () => {
     if (!sylSlots.every(Boolean)) return;
-    const parts = splitPhonicsToSyllables(practicePhonics);
+    const parts = splitPracticePhonicsSegments(practicePhonics);
     const expected =
       parts.length > 0 ? parts.map((s) => s.toLowerCase()) : [practiceWord.toLowerCase()];
     const got = sylSlots.map((s) => s.text.toLowerCase());
@@ -722,6 +732,8 @@ export default function PracticeScreen({ navigation, route }) {
                 {phonicsGroups.map((gr, i) => {
                   const pronSmall =
                     resolvePhonicsTtsInput(gr, graphemesPronunciation) || gr;
+                  const displayGrapheme = stripPipeDisplay(gr);
+                  const displayPron = stripPipeDisplay(pronSmall);
                   return (
                     <TouchableOpacity
                       key={`sound-${i}-${gr}`}
@@ -729,9 +741,9 @@ export default function PracticeScreen({ navigation, route }) {
                       onPress={() => void playPhonemeSoundAtIndex(i)}
                       activeOpacity={0.75}
                     >
-                      <Text style={styles.soundCardGrapheme}>{gr}</Text>
+                      <Text style={styles.soundCardGrapheme}>{displayGrapheme}</Text>
                       <Text style={styles.soundCardPron} numberOfLines={2}>
-                        {pronSmall}
+                        {displayPron}
                       </Text>
                     </TouchableOpacity>
                   );
@@ -766,7 +778,7 @@ export default function PracticeScreen({ navigation, route }) {
                     style={[styles.sylSlot, slot && styles.sylSlotFilled]}
                     onPress={() => onSylSlotTap(idx)}
                   >
-                    <Text style={styles.slotText}>{slot ? slot.text : ''}</Text>
+                    <Text style={styles.slotText}>{slot ? stripPipeDisplay(slot.text) : ''}</Text>
                   </TouchableOpacity>
                 ))}
                 </View>
@@ -780,7 +792,9 @@ export default function PracticeScreen({ navigation, route }) {
                   onPress={() => onSylPoolTap(item)}
                   disabled={item.placed}
                 >
-                  <Text style={[styles.tileText, item.placed && styles.tileTextGhost]}>{item.text}</Text>
+                  <Text style={[styles.tileText, item.placed && styles.tileTextGhost]}>
+                    {stripPipeDisplay(item.text)}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -823,7 +837,7 @@ export default function PracticeScreen({ navigation, route }) {
                           }
                         }}
                       >
-                        <Text style={styles.slotText}>{slot ? slot.text : ''}</Text>
+                        <Text style={styles.slotText}>{slot ? stripPipeDisplay(slot.text) : ''}</Text>
                       </Pressable>
                     ))}
                   </View>
@@ -837,7 +851,9 @@ export default function PracticeScreen({ navigation, route }) {
                     onPress={() => onPhPoolTap(item)}
                     disabled={item.placed}
                   >
-                    <Text style={[styles.tileText, item.placed && styles.tileTextGhost]}>{item.text}</Text>
+                    <Text style={[styles.tileText, item.placed && styles.tileTextGhost]}>
+                      {stripPipeDisplay(item.text)}
+                    </Text>
                   </TouchableOpacity>
                 ))}
               </View>

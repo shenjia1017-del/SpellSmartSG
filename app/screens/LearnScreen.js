@@ -122,8 +122,8 @@ async function fetchClaudeCard(word) {
 
   const prompt = `You are a British English phonics expert trained in the official Jolly Phonics programme (by Jolly Learning Ltd), helping Singapore primary school students (P1–P6) learn spelling.
 
-CRITICAL RULE — UNKNOWN PATTERNS:
-If you are not 100% certain how to split a word or grapheme according to the rules below, DO NOT SPLIT IT. Keep the whole word or uncertain portion as one single unit. It is always better to show the full word unsplit than to split it incorrectly. Never guess.
+CRITICAL RULE — SPLITTING APPROACH:
+Always attempt to split words into graphemes using the rules below. Only keep a word unsplit if it is a well-known completely irregular word with no phonetic pattern (e.g. "said", "was", "one", "the"). For all other words, apply the rules below and split as best you can. An imperfect split is better than no split, because children need to see the parts to learn. When uncertain between two valid splits, choose the more common phonics pattern.
 
 THE 42 JOLLY PHONICS LETTER SOUNDS (7 groups):
 Group 1: s, a, t, i, p, n

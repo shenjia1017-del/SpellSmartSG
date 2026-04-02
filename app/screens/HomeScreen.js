@@ -1,5 +1,13 @@
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../../lib/supabase';
 
@@ -99,6 +107,53 @@ export default function HomeScreen({ navigation }) {
     [weekGroups],
   );
 
+  const performDeleteWeek = async (weekLabel) => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData?.session?.user?.id;
+      if (!userId) {
+        setErrorMsg('Please log in to delete.');
+        return;
+      }
+      const { error: wordsError } = await supabase
+        .from('words')
+        .delete()
+        .eq('user_id', userId)
+        .eq('week_label', weekLabel);
+      if (wordsError) throw wordsError;
+      const { error: passagesError } = await supabase
+        .from('passages')
+        .delete()
+        .eq('user_id', userId)
+        .eq('week_label', weekLabel);
+      if (passagesError) throw passagesError;
+      setWeekGroups((prev) => prev.filter((g) => g.weekLabel !== weekLabel));
+      setSelectedWeek((prev) => (prev === weekLabel ? '' : prev));
+      setErrorMsg('');
+    } catch (e) {
+      setErrorMsg(e?.message ?? 'Failed to delete week.');
+    }
+  };
+
+  const confirmDeleteWeek = (group) => {
+    const labelDisplay = group.weekLabel === '' ? '(no label)' : group.weekLabel;
+    const count = group.words.length;
+    Alert.alert(
+      `Delete ${labelDisplay}?`,
+      `This will delete all ${count} words in this week. This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            void performDeleteWeek(group.weekLabel);
+          },
+        },
+      ],
+    );
+  };
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>This Week's Words</Text>
@@ -144,15 +199,27 @@ export default function HomeScreen({ navigation }) {
             {weekGroups.map((group) => {
               const active = group.weekLabel === selectedWeek;
               return (
-                <TouchableOpacity
+                <View
                   key={group.weekLabel}
                   style={[styles.weekRow, active && styles.weekRowActive]}
-                  onPress={() => setSelectedWeek(group.weekLabel)}
                 >
-                  <Text style={[styles.weekRowText, active && styles.weekRowTextActive]}>
-                    {group.weekLabel} — {group.words.length} words
-                  </Text>
-                </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.weekRowMain}
+                    onPress={() => setSelectedWeek(group.weekLabel)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.weekRowText, active && styles.weekRowTextActive]}>
+                      {group.weekLabel} — {group.words.length} words
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.weekRowDelete}
+                    onPress={() => confirmDeleteWeek(group)}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Text style={styles.weekRowDeleteText}>🗑</Text>
+                  </TouchableOpacity>
+                </View>
               );
             })}
             {weekGroups.length === 0 ? <Text style={styles.emptyText}>No words imported yet.</Text> : null}
@@ -252,16 +319,34 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   weekRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     borderWidth: 1,
     borderColor: '#d8d8d8',
     borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    paddingVertical: 6,
+    paddingLeft: 12,
+    paddingRight: 6,
     backgroundColor: '#fff',
   },
   weekRowActive: {
     borderColor: '#4A90E2',
     backgroundColor: '#E8F4FD',
+  },
+  weekRowMain: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingRight: 8,
+  },
+  weekRowDelete: {
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  weekRowDeleteText: {
+    fontSize: 18,
+    color: '#c00',
   },
   weekRowText: {
     color: '#444',

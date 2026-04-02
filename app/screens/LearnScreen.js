@@ -120,177 +120,157 @@ async function fetchClaudeCard(word) {
 
   console.log('[LearnScreen] Claude request for word:', word, 'model:', CLAUDE_MODEL);
 
-  const prompt = `You are a British English phonics expert trained in the Jolly Phonics system, helping Singapore primary school students (P1–P6) learn spelling. You must follow the exact phonics rules below when splitting words.
+  const prompt = `You are a British English phonics expert trained in the official Jolly Phonics programme (by Jolly Learning Ltd), helping Singapore primary school students (P1–P6) learn spelling.
 
-JOLLY PHONICS COMPLETE RULE LIBRARY:
+CRITICAL RULE — UNKNOWN PATTERNS:
+If you are not 100% certain how to split a word or grapheme according to the rules below, DO NOT SPLIT IT. Keep the whole word or uncertain portion as one single unit. It is always better to show the full word unsplit than to split it incorrectly. Never guess.
 
-GROUP 1 — SINGLE CONSONANT SOUNDS:
-b="buh", c="kuh", d="duh", f="fuh", g="guh", h="huh", j="juh", k="kuh", l="luh", m="muh", n="nuh", p="puh", r="ruh", s="sss", t="tuh", v="vuh", w="wuh", x="ks", y="yuh", z="zzz"
-- NEVER use letter names (e.g. never "bee" for b, never "pee" for p, never "tee" for t)
-- s at end of word after voiced consonant = "zzz" (e.g. dogs, beds)
-- s at end of word after unvoiced consonant = "sss" (e.g. cats, books)
-- c before e/i/y = "sss" (e.g. ce•ment, ci•ty, cy•cle)
-- c before a/o/u = "kuh" (e.g. cat, cot, cut)
-- g before e/i/y = "juh" (e.g. gem, gi•ant, gym)
-- g before a/o/u = "guh" (e.g. gap, got, gum)
-- silent b after m = "" (e.g. lamb, comb, thumb)
-- silent k before n = "" (e.g. knee, knife, know)
-- silent w before r = "" (e.g. write, wrong, wrap)
-- silent g before n = "" (e.g. gnaw, gnat, sign)
-- silent h in wh words (British) = "" (e.g. what→w•a•t, when→w•e•n)
-- silent p before n/s/t = "" (e.g. pneumonia, psychology)
+THE 42 JOLLY PHONICS LETTER SOUNDS (7 groups):
+Group 1: s, a, t, i, p, n
+Group 2: ck, e, h, r, m, d  
+Group 3: g, o, u, l, f, b
+Group 4: ai, j, oa, ie, ee, or
+Group 5: z, w, ng, v, oo (long as in moon), oo (short as in book)
+Group 6: y, x, ch, sh, th (voiced as in 'this'), th (unvoiced as in 'three')
+Group 7: qu, ou, oi, ue, er, ar
 
-GROUP 2 — CONSONANT DIGRAPHS (never split these):
-- ch = "chuh" (chin, church, much)
-- sh = "shh" (ship, dish, shell)
-- th voiced = "thh" (the, this, that, them, they, with)
-- th unvoiced = "thh" (think, three, both, math)
-- wh = "wuh" (when, where, which, while)
-- ph = "fuh" (phone, photo, graph, dolphin)
-- ng = "ing" (ring, sing, long, strong)
-- nk = "ink" (sink, think, drink, blank)
-- ck = "kuh" (back, duck, clock, stick)
-- gh = "guh" OR silent (ghost="guh", night=silent, though=silent)
-- dg = "juh" (edge, bridge, judge, fridge)
-- tch = "chuh" (watch, catch, match, witch)
-- qu = "kwuh" (queen, quick, quiet, square)
+LETTER SOUND RULES (use letter SOUNDS not letter NAMES):
+- s="sss", a="ah", t="tuh", i="ih", p="puh", n="nuh"
+- ck="kuh", e="eh", h="huh", r="ruh", m="muh", d="duh"
+- g="guh", o="oh", u="uh", l="luh", f="fuh", b="buh"
+- j="juh", or="orr", z="zzz", w="wuh", ng="ing", v="vuh"
+- y="yuh", x="ks", ch="chuh", sh="shh"
+- th (voiced, e.g. this/the/that/them/they/with)="thh"
+- th (unvoiced, e.g. think/three/both/math)="thh"
+- qu="kwuh", ou="ow", oi="oy", ue="yoo", er="err", ar="arr"
 
-GROUP 3 — CONSONANT BLENDS (each letter keeps its own sound, but stay together in graphemes):
-Beginning: bl, br, cl, cr, dr, fl, fr, gl, gr, pl, pr, sc, sk, sl, sm, sn, sp, st, sw, tr, tw, scr, spl, spr, str, squ
-Ending: ld, lf, lk, ll, lm, lp, lt, mp, nd, nk, nt, pt, sk, sp, st, xt
-- Note: blends are NOT digraphs — split them into individual phonemes in practiceGraphemes
-- e.g. "str•ee•t" NOT "street", "bl•a•ck" NOT "black"
+DIGRAPHS — NEVER SPLIT THESE (treat as one unit):
+ai="ay", ee="ee", oa="oh", ie="eye", or="orr", ng="ing",
+ck="kuh", ch="chuh", sh="shh", th="thh", qu="kwuh",
+ph="fuh", wh="wuh", nk="ink", dg="juh", tch="chuh"
 
-GROUP 4 — SHORT VOWELS (use these unless rules below override):
-- a = "ah" (cat, hand, flat, stamp)
-- e = "eh" (bed, help, best, spent)
-- i = "ih" (sit, fish, wind, gift)
-- o = "oh" (hot, dog, stop, clock)
-- u = "uh" (cup, jump, drum, must)
-- y as vowel in middle = "ih" (gym, myth, symbol)
-- y at end of short word = "ih" (happy, funny, silly — actually "ee" sound)
+VOWEL TEAMS — NEVER SPLIT THESE (treat as one unit):
+- ai="ay" (rain, tail, paid, main, plain)
+- ay="ay" (day, play, say, stay, away)
+- a_e="ay" (cake, make, came, gate, snake, late)
+- ee="ee" (feet, green, seen, tree, sheep)
+- ea="ee" (eat, beach, read, team, dream) EXCEPTION: ea="eh" in bread, head, dead, heavy, ready, weather, instead
+- e_e="ee" (these, theme, complete)
+- ey="ee" (key, money, honey, donkey, valley)
+- ie="eye" (pie, tie, lie, die, tried) EXCEPTION: ie="ee" in field, chief, piece, niece, grief
+- igh="eye" (night, light, right, fight, sight, high, thigh)
+- i_e="eye" (bike, time, fine, white, smile, kite)
+- y (end of word)="ee" (funny, happy, silly, quickly, really)
+- y (middle of word)="ih" (gym, myth, symbol, crystal)
+- y (end short word)="eye" (fly, dry, by, my, try, cry, sky)
+- oa="oh" (boat, coat, road, toast, groan, oak)
+- ow="oh" (low, show, snow, grow, own, slow, below) EXCEPTION: ow="ow" in cow, how, now, town, down, brown, crown, owl, tower
+- o_e="oh" (home, hope, note, stone, those, bone)
+- oe="oh" (toe, foe, goes, hoe)
+- oo (long)="oo" (moon, food, soon, school, tooth, room, boot)
+- oo (short)="uh" (book, look, cook, good, wood, stood, hood, foot)
+- ou="ow" (out, loud, found, ground, mouth, shout, cloud) EXCEPTIONS: ou="oo" in you/soup/through/group/route; ou="uh" in could/would/should; ou="oh" in shoulder/though/soul; ou="uh" in touch/young/double/trouble/country
+- ow="ow" (cow, how, now, town, down, brown, crown, owl)
+- oi="oy" (oil, join, coin, point, voice, moist)
+- oy="oy" (boy, toy, enjoy, destroy, royal, loyal)
+- ue="yoo" (cue, due, hue, rescue, argue, blue, true, glue) NOTE: ue="oo" in blue/true/glue/clue/flue
+- ew="yoo" (new, few, dew, knew) EXCEPTION: ew="oo" after r/l/bl/fl/cr/br (brew, flew, blew, crew, drew, grew, threw, chew, stew, screw)
+- u_e="yoo" (cube, tune, cute, huge, use, fuse) EXCEPTION: u_e="oo" after r/l/j (rule, June, rude, flute, prune)
+- er="err" (her, fern, serve, term, person, verb, nerve)
+- ir="err" (bird, girl, first, shirt, circle, third, firm)
+- ur="err" (burn, turn, hurt, purple, church, burst, curve)
+- ar="arr" (car, far, star, farm, garden, dark, bark, charm)
+- au="aw" (cause, fault, haunt, August, sauce, pause, author)
+- aw="aw" (saw, draw, jaw, straw, crawl, awful, claw)
+- al="aw" (talk, walk, calm, palm, half, calf, always, although) — l is silent
+- air="air" (hair, fair, chair, pair, stair, repair)
+- are="air" (bare, care, dare, hare, share, square, stare, compare)
+- ear="ear" (hear, near, fear, year, clear, dear, appear) EXCEPTION: ear="air" in bear/wear/pear/swear; ear="err" in earth/earn/early/heard/learn/pearl/search
+- eer="ear" (deer, beer, cheer, steer, career, engineer)
+- ire="eye-err" (fire, wire, hire, entire, inspire, tired, desire)
+- ure="yoor" (pure, cure, sure, nature, picture, future, adventure) NOTE: ure="err" in pressure/measure/treasure/pleasure/leisure
 
-GROUP 5 — LONG VOWELS (magic e / silent e rule):
-- a_e = "ay" (cake, make, came, game, place)
-- e_e = "ee" (these, here, eve, complete)
-- i_e = "eye" (bike, time, fine, white, smile)
-- o_e = "oh" (home, hope, note, stone, those)
-- u_e = "yoo" (cube, tune, cute, huge, use)
-- u_e after r/l/j/s = "oo" (rule, June, rude, blue)
-- silent e at end: merge with preceding consonant (e.g. make → m•a•k•e where "ke"="kuh" silent e)
+ADDITIONAL ALTERNATIVE SPELLINGS (from Jolly Phonics):
+- eigh="ay" (eight, weight, freight, neighbour, sleigh, weigh, they) — gh is silent
+- aigh="ay" (straight, straighten, straightforward) — gh is silent
+- ei="ay" (vein, rein, reign, eight, reindeer, beige)
+- a (open syllable)="ay" (baby, crazy, lady, paper, table, able)
+- e (open syllable)="ee" (email, secret, equal, even, evil, hotel)
+- i (open syllable)="eye" (icy, child, mild, find, kind, mind, wild)
+- o (open syllable)="oh" (open, hello, go, so, no, also, zero, over)
+- ge/gi/gy="juh" (germ, gentle, giant, magic, gym, energy, giraffe, age, huge)
+- ce/ci/cy="sss" (race, ice, city, cycle, cent, circus, ceiling, mice, face, place, voice, price, notice, since, fence, bounce, dance, glance)
+- ph="fuh" (photo, phone, graph, dolphin, elephant, alphabet, nephew, phrase, trophy)
+- wa="woh" (wash, was, want, watch, water, swan, swamp, wasp, wallet, wander)
+- wor="werr" (word, work, world, worm, worth, worry, worse, worship, sword)
+- war="worr" (war, warm, warn, ward, swarm, reward, toward)
+- wr="r" (write, wrong, wrap, wreck, wrist, wrestle, wren) — w is silent
+- kn="n" (know, knee, knife, knock, knight, knit, knob, knot, knew) — k is silent
+- gn="n" (gnaw, gnat, gnome, sign, foreign, design, campaign, reign) — g is silent
+- mb="m" (lamb, comb, climb, thumb, numb, bomb, womb, plumb, debt) — b is silent
+- bt="t" (doubt, debt, subtle) — b is silent
+- st="s" (listen, fasten, castle, whistle, bristle, thistle, Christmas) — t is silent
+- mn="m" (autumn, column, solemn, condemn, hymn) — n is silent
+- rh="r" (rhyme, rhythm, rhinoceros) — h is silent
+- sc="s" before e/i (scene, scent, science, scissors, muscle) — c is silent
+- gh="guh" (ghost, ghastly, dinghy, spaghetti) — NOT silent in these words
+- gh=silent (night, light, right, fight, though, thought, through, daughter, caught) — silent after vowel teams igh/ough/augh
 
-GROUP 6 — VOWEL TEAMS (never split these):
-- ai = "ay" (rain, paid, tail, wait, plain)
-- ay = "ay" (day, play, say, stay, away)
-- ee = "ee" (feet, green, seen, street, sheep)
-- ea = "ee" (eat, beach, read, team, dream) — EXCEPTION: ea="eh" in bread, head, dead, instead, heavy, ready, weather
-- ey = "ee" (key, money, honey, valley, donkey)
-- ie = "eye" (pie, tie, lie, die, tried) — EXCEPTION: ie="ee" in field, chief, piece, niece, grief
-- igh = "eye" (night, light, right, fight, sight)
-- oa = "oh" (boat, coat, road, toast, groan)
-- oe = "oh" (toe, foe, goes, hoe, oboe)
-- ow = "oh" (low, show, snow, grow, own) — EXCEPTION: ow="ow" in cow, how, now, town, down, brown, crown
-- oo = "oo" (moon, food, soon, school, tooth) — EXCEPTION: oo="uh" in book, look, cook, good, wood, stood, hood
-- ou = "ow" (out, loud, found, ground, mouth) — EXCEPTION: ou="oo" in you, soup, through, group, route; ou="uh" in could, would, should; ou="oh" in shoulder, though, soul
-- oi = "oy" (oil, join, coin, point, voice)
-- oy = "oy" (boy, toy, enjoy, destroy, royal)
-- ue = "yoo" (cue, due, hue, rescue, argue)
-- ew = "yoo" (new, few, dew, grew, knew) — EXCEPTION: ew="oo" after r/l (brew, flew, blew, crew)
-- ui = "ih" (build, guilt, guitar) — EXCEPTION: ui="oo" in fruit, juice, suit, cruise
-- au = "aw" (cause, fault, haunt, August, sauce)
-- aw = "aw" (saw, draw, jaw, straw, crawl)
-- augh = "aw" (caught, taught, daughter, naughty)
-- ough = context dependent:
-  * "aw" in thought, bought, ought, brought, fought
-  * "oo" in through
-  * "ow" in plough, bough
-  * "oh" in though, dough
-  * "uh" in thorough
-  * "off" in cough, trough
+SPECIAL MULTI-LETTER CHUNKS (keep together as one unit):
+- tion="shun" (nation, action, station, mention, attention, position, question→"kes-chun")
+- sion="shun" (mansion, tension, extension, comprehension, permission, expression)
+- sion after vowel="zhun" (vision, television, division, conclusion, explosion, occasion, decision)
+- ture="cher" (picture, nature, future, adventure, creature, mixture, fracture, capture)
+- ous="uss" (famous, nervous, dangerous, gorgeous, jealous, generous, marvellous, enormous, serious, various, obvious, previous, glorious, furious, curious)
+- cial="shull" (special, social, official, crucial, facial, racial, glacial)
+- tial="shull" (partial, initial, essential, potential, spatial, martial, substantial)
+- cian="shun" (musician, magician, politician, technician, optician, electrician)
+- cious="shuss" (precious, gracious, spacious, ferocious, atrocious, conscious, luscious)
+- tious="shuss" (cautious, ambitious, nutritious, infectious, fictitious, pretentious)
+- age (end)="ij" (village, package, message, damage, manage, cottage, cabbage, savage, bandage, language, sausage, average, advantage, disadvantage)
+- ace (end)="iss" (palace, surface, menace, furnace, necklace, terrace, interface)
+- le (end)="ul" (table, simple, circle, apple, little, bottle, castle, turtle, jungle, purple, middle, noodle, handle, candle, puzzle, giggle, tickle, pickle, whistle)
+- en (end)="un" (open, broken, frozen, often, garden, chicken, spoken, token, happen, kitchen, listen, often, sudden, certain, fasten)
+- el (end)="ul" (camel,anel, tunnel, squirrel, barrel, channel, flannel, travel, level, novel, cancel, model)
+- ed (after unvoiced consonant p/k/t/f/s/sh/ch/x)="t" (jumped, walked, stopped, talked, helped, passed, watched, fixed, laughed, kissed, wished, reached)
+- ed (after voiced consonant or vowel)="d" (played, rained, moved, lived, showed, called, named, loved, used, described)
+- ed (after t or d)="id" (wanted, landed, needed, started, waited, ended, added, melted, visited, counted, divided, folded)
 
-GROUP 7 — R-CONTROLLED VOWELS (never split these):
-- ar = "arr" (car, far, star, farm, garden, dark)
-- or = "orr" (for, born, storm, short, sport, corner)
-- er = "err" (her, fern, serve, term, person)
-- ir = "err" (bird, girl, first, shirt, circle)
-- ur = "err" (burn, turn, hurt, purple, church)
-- air = "air" (hair, fair, chair, pair, stair)
-- ear = "ear" (hear, near, fear, year, clear) — EXCEPTION: ear="air" in bear, wear, pear, swear
-- eer = "ear" (deer, beer, cheer, steer, career)
-- are = "air" (bare, care, dare, hare, share, square)
-- ore = "orr" (more, store, bore, score, before)
-- ire = "eye-err" (fire, wire, hire, entire, inspire)
-- ure = "yoor" (pure, cure, sure, nature, picture)
-- war = "worr" (war, warm, warn, ward, swarm)
-- wor = "werr" (word, work, world, worm, worth)
+DOUBLING RULE (from Jolly Phonics Grammar 1):
+Words with a short stressed vowel before a suffix have doubled consonant: fatter, bedding, hilly, hottest, button, running, sitting, hopping, getting, putting, cutting, bigger, thinner
+Words with long vowel or other vowel do NOT double: sailor, leaflet, silent, hotel, booking, sooner, eating, hoping, making, reading
 
-GROUP 8 — SPECIAL MULTI-LETTER CHUNKS (keep together, never split):
-- tion = "shun" (nation, action, station, mention, attention)
-- sion = "shun" (mansion, tension, extension, comprehension)
-- sion after vowel = "zhun" (vision, television, division, conclusion, explosion)
-- ture = "cher" (picture, nature, future, adventure, creature)
-- ous = "uss" (famous, nervous, serious, dangerous, gorgeous)
-- ious = "ee-uss" (serious, various, obvious, previous, glorious)
-- tion after s = "chun" (question, digestion, suggestion)
-- cial = "shull" (special, social, official, crucial, facial)
-- tial = "shull" (partial, initial, essential, potential, spatial)
-- cian = "shun" (musician, magician, politician, technician)
-- cious = "shuss" (precious, gracious, spacious, ferocious, atrocious)
-- tious = "shuss" (cautious, ambitious, nutritious, infectious)
-- age at end = "ij" (village, package, message, damage, manage)
-- ace at end = "iss" (palace, surface, menace, furnace)
-- ure at end = "cher" (treasure, measure, pleasure, leisure)
-- el/le at end = "ul" (table, simple, circle, apple, little, bottle)
-- en at end = "un" (open, broken, frozen, often, garden)
-- ed at end after unvoiced = "t" (jumped, walked, stopped, talked, helped)
-- ed at end after voiced = "d" (played, rained, moved, lived, showed)
-- ed at end after t/d = "id" (wanted, landed, needed, started, waited)
-- ing = "ing" (running, jumping, playing, singing, helping)
-
-GROUP 9 — SILENT LETTER PATTERNS:
-- silent e at end (already covered above)
-- silent b: mb="m" (lamb, comb, climb, thumb, numb, bomb), bt="t" (doubt, debt, subtle)
-- silent k: kn="n" (know, knee, knife, knock, knight, knit)
-- silent w: wr="r" (write, wrong, wrap, wreck, wrist, wrestle)
-- silent g: gn="n" at start (gnaw, gnat, gnome), gn="n" at end (sign, foreign, design, campaign)
-- silent h: rh="r" (rhyme, rhythm, rhinoceros), gh=silent in ight/aught/ought patterns
-- silent l: al before f/k/m/v = "aw" (half, calm, palm, walk, talk, folk, salmon)
-- silent t: st sometimes = "s" (listen, fasten, castle, whistle, bristle, thistle)
-- silent n: mn = "m" (autumn, column, solemn, condemn, hymn)
-- silent p: ps="s" (psychology, psalm, pterodactyl)
-- silent c: sc before e/i = "s" (scene, scent, science, scissors, muscle)
-
-GROUP 10 — SYLLABLE SPLITTING RULES (for practicePhonics):
-- Split between two consonants: hap•py, win•ter, car•pet, gar•den
-- Split before single consonant if vowel is long: ti•ger, pa•per, mu•sic, o•pen
-- Split after single consonant if vowel is short: cab•in, hab•it, rob•in, mod•el
-- Prefixes stay together: un•happy, re•turn, dis•cover, pre•tend, mis•take
-- Suffixes stay together: play•ing, help•ful, care•less, quick•ly, friend•ship
-- Compound words split at word boundary: sun•shine, rain•bow, foot•ball, bed•room
-- Never split consonant digraphs across syllables: broth•er NOT brot•her
-- Never split vowel teams across syllables: rain•bow NOT ra•inbow
-- -le at end: consonant goes with le: ta•ble, sim•ple, cir•cle, tur•tle
+SYLLABLE SPLITTING RULES (for practicePhonics — rhythm only):
+- Single syllable words: NEVER split (straight, caught, knight, through, scream, bright, thought, school, might, friend, build, world)
+- Split between two consonants: win•ter, car•pet, gar•den, hap•py, let•ter, but•ter, din•ner, sum•mer, pep•per
+- Long vowel before single consonant: split before consonant: ti•ger, pa•per, mu•sic, o•pen, si•lent, e•ven, po•lite, be•fore
+- Short vowel before single consonant: split after consonant: cab•in, hab•it, rob•in, mod•el, pun•ish, lim•it, riv•er, vis•it
+- Prefixes stay together: un•hap•py, re•turn, dis•cov•er, pre•tend, mis•take, be•cause, a•round, be•long, be•tween, be•low
+- Suffixes stay together: play•ing, help•ful, care•less, quick•ly, friend•ship, use•less, hope•ful, dark•ness, sad•ness
+- Compound words split at boundary: sun•shine, rain•bow, foot•ball, bed•room, some•thing, any•thing, every•thing, with•out, in•side, out•side
+- NEVER split a digraph or vowel team across syllables: broth•er NOT brot•her; rain•bow NOT ra•in•bow
+- le ending: consonant goes WITH le: ta•ble, sim•ple, cir•cle, tur•tle, mid•dle, bot•tle, gig•gle, puz•zle
 
 For this exact spelling entry: ${JSON.stringify(word)}
 
 Return ONLY valid JSON, no markdown, no extra text:
 {
-  "phonics": "syllable breakdown of full entry using • (e.g. 'chil•dren', 'ap•proached')",
-  "definition": "one short child-friendly definition, max 2 sentences, simple words suitable for Singapore P1-P6",
-  "example": "one natural example sentence using the word or phrase",
+  "phonics": "syllable breakdown of full entry using • separator",
+  "definition": "one short child-friendly definition max 2 sentences, suitable for Singapore P1-P6",
+  "example": "one natural example sentence",
   "emoji": "one Unicode emoji representing the meaning",
-  "practiceWord": "if multi-word phrase pick the hardest single word; if already single word return it unchanged",
-  "practicePhonics": "syllable breakdown of practiceWord by RHYTHM using rules from GROUP 10 above",
-  "practiceGraphemes": "sound-unit breakdown of practiceWord using ALL rules above. Each unit separated by •. Apply GROUP 9 silent letter rules (silent letters get empty string or merge). Apply GROUP 8 chunks. Apply GROUP 2 digraphs. Apply GROUP 6 vowel teams. Apply GROUP 7 r-controlled. NEVER split a digraph, vowel team, or special chunk.",
+  "practiceWord": "if multi-word phrase pick the hardest single word; if single word return unchanged",
+  "practicePhonics": "syllable breakdown of practiceWord by RHYTHM using syllable rules above. Single syllable words = return word unchanged with no •",
+  "practiceGraphemes": "sound-unit breakdown of practiceWord. Use ALL digraph/vowel team/chunk rules above. NEVER split a digraph, vowel team, or special chunk. If uncertain about any portion, keep that portion as one unsplit unit rather than guessing.",
   "graphemesPronunciation": {
-    "each_grapheme": "exact British English TTS text using sounds from GROUP 1-8 above. Silent letters use empty string. Follow all exception rules."
+    "each_grapheme_key": "British English TTS pronunciation text using sounds from rules above. Silent letters use empty string ''."
   },
   "definitions": [
-    {"type": "verb/noun/adjective/adverb", "meaning": "simple definition for this word type, P1-P6 level"}
+    {"type": "verb/noun/adjective/adverb", "meaning": "simple P1-P6 definition"}
   ]
 }
 
-CRITICAL: practicePhonics (rhythm) and practiceGraphemes (sound units) MUST be different for most words. graphemesPronunciation must have exactly one key per unit in practiceGraphemes.
+REMEMBER: If unsure how to split any part of a word, keep it whole. Never guess. Incorrect splitting is worse than no splitting.
 `;
 
   const response = await fetch('https://api.anthropic.com/v1/messages', {

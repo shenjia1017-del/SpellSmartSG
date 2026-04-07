@@ -1,9 +1,11 @@
+import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 import { supabase } from '../../lib/supabase';
 
-export default function RegisterScreen({ navigation }) {
+export default function RegisterScreen() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -36,7 +38,7 @@ export default function RegisterScreen({ navigation }) {
 
       // Supabase may require email confirmation depending on project settings.
       // After successful signUp, guide users back to login.
-      navigation.navigate('Login');
+      router.replace('/login');
     } catch (e) {
       setErrorMsg(e?.message ?? 'Failed to register.');
     } finally {
@@ -76,7 +78,7 @@ export default function RegisterScreen({ navigation }) {
         <Text style={styles.buttonText}>{loading ? 'Registering...' : 'Register'}</Text>
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.linkButton} onPress={() => navigation.navigate('Login')}>
+      <TouchableOpacity style={styles.linkButton} onPress={() => router.push('/login')}>
         <Text style={styles.linkText}>Already have an account? Log in</Text>
       </TouchableOpacity>
     </View>

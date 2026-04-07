@@ -1,3 +1,8 @@
+/**
+ * Expo Router template Tabs (index / explore). SpellSmart’s main app uses file routes + Stack in app/_layout.tsx.
+ * Dictation is app/dictation.tsx (route name "dictation"). You cannot add Stack.Screen here — this file must
+ * export a Tabs layout for the (tabs) group only.
+ */
 import { Tabs } from 'expo-router';
 import React from 'react';
 

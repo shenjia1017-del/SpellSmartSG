@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -33,7 +34,8 @@ function guessImageMimeFromFileName(name) {
   return 'image/jpeg';
 }
 
-export default function ImportScreen({ navigation }) {
+export default function ImportScreen() {
+  const router = useRouter();
   const [showManual, setShowManual] = useState(false);
   const [wordInput, setWordInput] = useState('');
 
@@ -582,6 +584,7 @@ export default function ImportScreen({ navigation }) {
     }
 
     const confirmedWords = normalizeWords(extractedWords);
+    /** Full dictation text comes from state `extractedPassage` (multiline input). */
     const passageText = extractedPassage.trim();
 
     if (!confirmedWords.length && !passageText) {
@@ -594,6 +597,10 @@ export default function ImportScreen({ navigation }) {
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const userId = sessionData?.session?.user?.id;
+      console.log('Passage text to save:', passageText);
+      console.log('Week label:', weekLabel);
+      console.log('Week label (trimmed, used for DB):', wl);
+      console.log('User ID:', userId ?? '(null)');
       if (!userId) {
         setErrorMsg('You must be logged in to save.');
         return;
@@ -615,18 +622,26 @@ export default function ImportScreen({ navigation }) {
       }
 
       if (passageText) {
+        console.log('[ImportScreen] Calling passages.insert with body, user_id, week_label (same wl as words).');
         const { error: passageError } = await supabase.from('passages').insert({
-          user_id: userId,
           body: passageText,
+          user_id: userId,
           week_label: wl,
         });
-        if (passageError) throw passageError;
+        if (passageError) {
+          console.log('Passage save error:', passageError);
+          throw passageError;
+        }
+        console.log('Passage saved successfully');
+      } else {
+        console.log('[ImportScreen] Skipping passages insert — passageText is empty after trim.');
       }
 
       setSaveSuccess({
-        count: insertedWordRows.length,
+        count: confirmedWords.length,
         weekLabel: wl,
         words: insertedWordRows,
+        passageSaved: Boolean(passageText),
       });
     } catch (e) {
       setErrorMsg(e?.message ?? 'Failed to save words or passage.');
@@ -674,14 +689,13 @@ export default function ImportScreen({ navigation }) {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      onTouchStart={() => Keyboard.dismiss()}
     >
       <ScrollView
         ref={scrollRef}
         style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: 300 }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator
       >
@@ -767,7 +781,7 @@ export default function ImportScreen({ navigation }) {
         </View>
       ) : null}
 
-      {extractedWords.length > 0 || extractedPassage.trim().length > 0 ? (
+      {extractedWords.length > 0 || extractedPassage.trim().length > 0 || showManual ? (
         <View style={styles.extractedSection} onLayout={onReviewSectionLayout}>
           <Text style={styles.manualTitle}>Review before saving</Text>
 
@@ -802,13 +816,16 @@ export default function ImportScreen({ navigation }) {
             <Text style={styles.hintText}>No list items detected — you can add words manually below or retake the photo.</Text>
           )}
 
-          <Text style={styles.sectionLabel}>Dictation passage</Text>
+          <Text style={styles.sectionLabel}>Dictation passage (sentences)</Text>
+          <Text style={styles.hintText}>
+            Full dictation text for this week — type, paste, or edit what OCR extracted. Saved to your passages list.
+          </Text>
           <TextInput
             style={[styles.input, styles.passageInput]}
             value={extractedPassage}
             multiline
             textAlignVertical="top"
-            placeholder="Paragraph text from the worksheet (editable)"
+            placeholder="Paste or type the full passage / sentences for dictation…"
             onChangeText={setExtractedPassage}
           />
 
@@ -818,21 +835,30 @@ export default function ImportScreen({ navigation }) {
             {saving ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.saveButtonText}>Save words & passage</Text>
+              <Text style={styles.saveButtonText}>Save words, phrases & sentences</Text>
             )}
           </TouchableOpacity>
 
           {saveSuccess ? (
             <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
               <View style={styles.successBox}>
-                <Text style={styles.successText}>✓ {saveSuccess.count} words saved!</Text>
+                <Text style={styles.successText}>
+                  {saveSuccess.passageSaved && saveSuccess.count === 0
+                    ? '✓ Sentences saved.'
+                    : saveSuccess.passageSaved
+                      ? `✓ ${saveSuccess.count} words saved! Sentences saved.`
+                      : `✓ ${saveSuccess.count} words saved!`}
+                </Text>
                 <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
                   <TouchableOpacity
                     style={styles.successStartBtn}
                     onPress={() =>
-                      navigation.navigate('Learn', {
-                        words: saveSuccess.words,
-                        weekLabel: saveSuccess.weekLabel,
+                      router.push({
+                        pathname: '/learn',
+                        params: {
+                          weekLabel: String(saveSuccess.weekLabel ?? ''),
+                          wordsJSON: JSON.stringify(saveSuccess.words ?? []),
+                        },
                       })
                     }
                   >
@@ -859,7 +885,7 @@ export default function ImportScreen({ navigation }) {
           />
 
           {errorMsg &&
-          !(extractedWords.length > 0 || extractedPassage.trim().length > 0) ? (
+          !(extractedWords.length > 0 || extractedPassage.trim().length > 0 || showManual) ? (
             <Text style={styles.errorText}>{errorMsg}</Text>
           ) : null}
 
@@ -899,7 +925,7 @@ export default function ImportScreen({ navigation }) {
 
       <TouchableOpacity
         style={styles.backButton}
-        onPress={() => navigation.goBack()}
+        onPress={() => router.back()}
       >
         <Text style={styles.backText}>← Back</Text>
       </TouchableOpacity>
@@ -909,18 +935,14 @@ export default function ImportScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-  },
   scroll: {
     flex: 1,
     width: '100%',
+    backgroundColor: '#fff',
   },
   scrollContent: {
     alignItems: 'center',
     paddingTop: 70,
-    paddingBottom: 40,
   },
   title: {
     fontSize: 28,

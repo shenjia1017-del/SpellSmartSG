@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -10,7 +11,8 @@ import {
 
 import { supabase } from '../../lib/supabase';
 
-export default function LoginScreen({ navigation }) {
+export default function LoginScreen() {
+  const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -24,7 +26,7 @@ export default function LoginScreen({ navigation }) {
       try {
         const { data } = await supabase.auth.getSession();
         if (isActive && data?.session) {
-          navigation.replace('Home');
+          router.replace('/home');
         }
       } catch {
         // Ignore and allow user to manually login.
@@ -34,7 +36,7 @@ export default function LoginScreen({ navigation }) {
     return () => {
       isActive = false;
     };
-  }, [navigation]);
+  }, [router]);
 
   const onLogin = async () => {
     const trimmedEmail = email.trim();
@@ -60,7 +62,7 @@ export default function LoginScreen({ navigation }) {
 
       if (error) throw error;
 
-      navigation.replace('Home');
+      router.replace('/home');
     } catch (e) {
       setErrorMsg(e?.message ?? 'Failed to log in.');
     } finally {
@@ -105,7 +107,7 @@ export default function LoginScreen({ navigation }) {
         )}
       </TouchableOpacity>
 
-      <TouchableOpacity style={styles.linkButton} onPress={() => navigation.navigate('Register')}>
+      <TouchableOpacity style={styles.linkButton} onPress={() => router.push('/register')}>
         <Text style={styles.linkText}>New here? Create an account</Text>
       </TouchableOpacity>
     </View>

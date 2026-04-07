@@ -1,4 +1,6 @@
 import * as Haptics from 'expo-haptics';
+import { useNavigation } from '@react-navigation/native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -86,22 +88,46 @@ const stripPipeDisplay = (text) => (text ? String(text).replace(/\|/g, '') : '')
 const SUCCESS_SOUND_URI =
   'https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3';
 
-export default function PracticeScreen({ navigation, route }) {
-  const word = String(route.params?.word ?? '').trim();
-  const practiceWord = String(route.params?.practiceWord ?? word).trim();
+function paramStr(params, key) {
+  const v = params[key];
+  if (v == null) return '';
+  return Array.isArray(v) ? String(v[0] ?? '') : String(v);
+}
+
+export default function PracticeScreen() {
+  const router = useRouter();
+  const navigation = useNavigation();
+  const params = useLocalSearchParams();
+  const word = String(paramStr(params, 'word')).trim();
+  const practiceWord = String(paramStr(params, 'practiceWord') || word).trim();
   /** Syllable/rhythm splits — Syllables tab ONLY. */
-  const practicePhonics = String(route.params?.practicePhonics ?? '').trim();
+  const practicePhonics = String(paramStr(params, 'practicePhonics')).trim();
   /** Phonics sound units — Phonics tab ONLY (never use practicePhonics here). */
-  const practiceGraphemes = String(route.params?.practiceGraphemes ?? '').trim();
-  const definitions = Array.isArray(route.params?.definitions) ? route.params.definitions : [];
+  const practiceGraphemes = String(paramStr(params, 'practiceGraphemes')).trim();
+  const definitions = useMemo(() => {
+    const raw = paramStr(params, 'definitionsJSON');
+    if (!raw.trim()) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, [params.definitionsJSON]);
   const exampleSentence = String(
-    route.params?.exampleSentence ?? route.params?.example ?? '',
+    paramStr(params, 'exampleSentence') || paramStr(params, 'example'),
   ).trim();
   const graphemesPronunciation = useMemo(() => {
-    const gp = route.params?.graphemesPronunciation;
-    if (gp && typeof gp === 'object' && !Array.isArray(gp)) return gp;
+    const raw = paramStr(params, 'graphemesPronunciationJSON');
+    if (!raw.trim()) return {};
+    try {
+      const gp = JSON.parse(raw);
+      if (gp && typeof gp === 'object' && !Array.isArray(gp)) return gp;
+    } catch {
+      // ignore
+    }
     return {};
-  }, [route.params?.graphemesPronunciation]);
+  }, [params.graphemesPronunciationJSON]);
 
   const [tab, setTab] = useState('sound');
   const [ttsBusy, setTtsBusy] = useState(false);
@@ -579,8 +605,31 @@ export default function PracticeScreen({ navigation, route }) {
   };
 
   const goLearnNextWord = useCallback(() => {
-    navigation.navigate('Learn', { advanceToNextWord: true });
-  }, [navigation]);
+    const wj = paramStr(params, 'wordsJSON');
+    const li = Number(paramStr(params, 'learnIndex')) || 0;
+    if (!wj.trim()) {
+      router.replace({ pathname: '/learn', params: { advanceToNextWord: 'true' } });
+      return;
+    }
+    let list = [];
+    try {
+      list = JSON.parse(wj);
+    } catch {
+      list = [];
+    }
+    if (!Array.isArray(list) || list.length === 0) {
+      router.replace({ pathname: '/learn', params: { advanceToNextWord: 'true' } });
+      return;
+    }
+    const next = Math.min(li + 1, list.length - 1);
+    router.replace({
+      pathname: '/learn',
+      params: {
+        wordsJSON: wj,
+        learnIndex: String(next),
+      },
+    });
+  }, [params, router]);
 
   const checkSpelling = () => {
     if (spellSlots.some((x) => x == null)) return;
@@ -601,7 +650,7 @@ export default function PracticeScreen({ navigation, route }) {
   };
 
   const goBackLearn = () => {
-    navigation.goBack();
+    router.back();
   };
 
   const onFillInChoicePress = (choice, index) => {

@@ -1,3 +1,4 @@
+import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -11,8 +12,10 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../../lib/supabase';
 
-export default function HomeScreen({ navigation }) {
+export default function HomeScreen() {
+  const router = useRouter();
   const [loading, setLoading] = useState(false);
+  const [dictationLoading, setDictationLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [weekGroups, setWeekGroups] = useState([]);
   const [selectedWeek, setSelectedWeek] = useState('');
@@ -161,7 +164,7 @@ export default function HomeScreen({ navigation }) {
 
       <TouchableOpacity
         style={styles.button}
-        onPress={() => navigation.navigate('Import')}
+        onPress={() => router.push('/import')}
       >
         <Text style={styles.buttonText}>Import Word List</Text>
       </TouchableOpacity>
@@ -178,14 +181,81 @@ export default function HomeScreen({ navigation }) {
             '[HomeScreen] words being passed:',
             JSON.stringify(selectedWords[0]),
           );
-          navigation.navigate('Learn', {
-            weekLabel: selectedGroup?.weekLabel ?? '',
-            words: selectedWords,
+          router.push({
+            pathname: '/learn',
+            params: {
+              weekLabel: selectedGroup?.weekLabel ?? '',
+              wordsJSON: JSON.stringify(selectedWords),
+            },
           });
         }}
         disabled={!selectedWeek || !selectedGroup || selectedGroup.words.length === 0}
       >
         <Text style={styles.buttonText}>Start Learning</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[
+          styles.button,
+          styles.dictationOutlineButton,
+          (!selectedWeek || !selectedGroup || selectedGroup.words.length === 0 || dictationLoading) &&
+            styles.buttonDisabled,
+        ]}
+        onPress={async () => {
+          if (dictationLoading) return;
+          const selectedWords = selectedGroup?.words ?? [];
+          const weekLabel = selectedGroup?.weekLabel ?? '';
+          const words = selectedWords
+            .map((row) => ({
+              word: String(typeof row === 'string' ? row : row?.word ?? '').trim(),
+              week_label: String(
+                (typeof row === 'object' && row != null && row.week_label != null
+                  ? row.week_label
+                  : weekLabel) ?? '',
+              ),
+            }))
+            .filter((w) => w.word.length > 0);
+          setDictationLoading(true);
+          setErrorMsg('');
+          try {
+            const { data: sessionData } = await supabase.auth.getSession();
+            const userId = sessionData?.session?.user?.id;
+            if (!userId) {
+              setErrorMsg('Please log in to open dictation.');
+              return;
+            }
+            const { data: passageRows, error } = await supabase
+              .from('passages')
+              .select('body, week_label')
+              .eq('user_id', userId)
+              .eq('week_label', weekLabel);
+            if (error) throw error;
+            const passages = (Array.isArray(passageRows) ? passageRows : [])
+              .map((row) => ({
+                body: String(row?.body ?? '').trim(),
+                week_label: String(row?.week_label ?? weekLabel),
+              }))
+              .filter((p) => p.body.length > 0);
+            router.push({
+              pathname: '/dictation',
+              params: {
+                wordsJSON: JSON.stringify(words),
+                passagesJSON: JSON.stringify(passages),
+              },
+            });
+          } catch (e) {
+            setErrorMsg(e?.message ?? 'Failed to load passages.');
+          } finally {
+            setDictationLoading(false);
+          }
+        }}
+        disabled={
+          !selectedWeek || !selectedGroup || selectedGroup.words.length === 0 || dictationLoading
+        }
+      >
+        <Text style={styles.dictationOutlineButtonText}>
+          {dictationLoading ? 'Loading…' : 'Dictation Test 📝'}
+        </Text>
       </TouchableOpacity>
       {!selectedWeek ? <Text style={styles.selectWeekHint}>Please select a week first</Text> : null}
 
@@ -280,6 +350,16 @@ const styles = StyleSheet.create({
   },
   secondButton: {
     backgroundColor: '#7ED321',
+  },
+  dictationOutlineButton: {
+    backgroundColor: '#fff',
+    borderWidth: 2,
+    borderColor: '#378ADD',
+  },
+  dictationOutlineButtonText: {
+    color: '#378ADD',
+    fontSize: 18,
+    fontWeight: 'bold',
   },
   buttonDisabled: {
     opacity: 0.45,

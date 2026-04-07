@@ -1,4 +1,5 @@
 import { useFocusEffect } from '@react-navigation/native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -360,7 +361,15 @@ REMEMBER: If unsure how to split any part of a word, keep it whole. Never guess.
   };
 }
 
-export default function LearnScreen({ navigation, route }) {
+function paramFromSearchParams(params, key) {
+  const v = params[key];
+  if (v == null) return undefined;
+  return Array.isArray(v) ? v[0] : v;
+}
+
+export default function LearnScreen() {
+  const router = useRouter();
+  const params = useLocalSearchParams();
   const [userId, setUserId] = useState(null);
   const [words, setWords] = useState([]);
   const [index, setIndex] = useState(0);
@@ -407,11 +416,12 @@ export default function LearnScreen({ navigation, route }) {
 
   useFocusEffect(
     useCallback(() => {
-      if (route.params?.advanceToNextWord && words.length > 0) {
+      const adv = paramFromSearchParams(params, 'advanceToNextWord');
+      if (String(adv) === 'true' && words.length > 0) {
         setIndex((i) => Math.min(words.length - 1, i + 1));
-        navigation.setParams({ advanceToNextWord: undefined });
+        router.setParams({ advanceToNextWord: '' });
       }
-    }, [route.params?.advanceToNextWord, navigation, words.length]),
+    }, [params, router, words.length]),
   );
 
   useEffect(() => {
@@ -421,14 +431,23 @@ export default function LearnScreen({ navigation, route }) {
       setLoadingList(true);
       setErrorMsg(null);
       try {
-        const passedWordsRaw = route.params?.words;
-        const passedWords = Array.isArray(passedWordsRaw)
-          ? passedWordsRaw
-              .filter(Boolean)
-              .map((w) =>
-                typeof w === 'string' ? { id: null, word: w, learn_card_json: null } : w,
-              )
-          : [];
+        const wordsJSONRaw = paramFromSearchParams(params, 'wordsJSON');
+        let rawList = null;
+        if (wordsJSONRaw) {
+          try {
+            const parsed = JSON.parse(String(wordsJSONRaw));
+            rawList = Array.isArray(parsed) ? parsed : [];
+          } catch {
+            rawList = [];
+          }
+        }
+        if (!rawList) rawList = [];
+        const passedWords = rawList
+          .filter(Boolean)
+          .map((w) =>
+            typeof w === 'string' ? { id: null, word: w, learn_card_json: null } : w,
+          );
+        const learnIndexRaw = paramFromSearchParams(params, 'learnIndex');
 
         console.log('[LearnScreen] First word raw:', JSON.stringify(passedWords[0]));
 
@@ -472,7 +491,15 @@ export default function LearnScreen({ navigation, route }) {
 
         if (!cancelled) {
           setWords(list);
-          setIndex(0);
+          const hadPassedWords = passedWords.length > 0;
+          const nextIdx =
+            hadPassedWords && learnIndexRaw != null && String(learnIndexRaw).trim() !== ''
+              ? Math.max(
+                  0,
+                  Math.min(Number(learnIndexRaw) || 0, Math.max(0, list.length - 1)),
+                )
+              : 0;
+          setIndex(nextIdx);
         }
       } catch (e) {
         if (!cancelled) {
@@ -487,7 +514,7 @@ export default function LearnScreen({ navigation, route }) {
     return () => {
       cancelled = true;
     };
-  }, [route.params?.words]);
+  }, [params.wordsJSON, params.learnIndex]);
 
   useEffect(() => {
     if (!currentWord || !userId) {
@@ -684,18 +711,23 @@ export default function LearnScreen({ navigation, route }) {
 
   const goPractice = () => {
     if (!card.practiceWord) return;
-    navigation.navigate('Practice', {
-      word: currentWord,
-      practiceWord: card.practiceWord,
-      practicePhonics: card.practicePhonics,
-      practiceGraphemes: ensureDistinctGraphemes(
-        card.practiceWord,
-        card.practicePhonics,
-        card.practiceGraphemes ?? '',
-      ),
-      graphemesPronunciation: card.graphemesPronunciation ?? {},
-      definitions: card.definitions ?? [],
-      exampleSentence: card.example ?? '',
+    router.push({
+      pathname: '/practice',
+      params: {
+        word: currentWord,
+        practiceWord: card.practiceWord,
+        practicePhonics: card.practicePhonics,
+        practiceGraphemes: ensureDistinctGraphemes(
+          card.practiceWord,
+          card.practicePhonics,
+          card.practiceGraphemes ?? '',
+        ),
+        graphemesPronunciationJSON: JSON.stringify(card.graphemesPronunciation ?? {}),
+        definitionsJSON: JSON.stringify(card.definitions ?? []),
+        exampleSentence: card.example ?? '',
+        wordsJSON: JSON.stringify(words),
+        learnIndex: String(index),
+      },
     });
   };
 
@@ -720,7 +752,7 @@ export default function LearnScreen({ navigation, route }) {
     return (
       <View style={[styles.container, styles.centered]}>
         <Text style={styles.errorText}>{errorMsg ?? 'Not logged in.'}</Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
       </View>
@@ -732,7 +764,7 @@ export default function LearnScreen({ navigation, route }) {
       <View style={[styles.container, styles.centered]}>
         <Text style={styles.muted}>No words saved yet.</Text>
         <Text style={styles.hint}>Import a list from the Home screen first.</Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
       </View>
@@ -811,7 +843,7 @@ export default function LearnScreen({ navigation, route }) {
         </TouchableOpacity>
       </ScrollView>
 
-      <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
+      <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
         <Text style={styles.backText}>← Back</Text>
       </TouchableOpacity>
     </View>

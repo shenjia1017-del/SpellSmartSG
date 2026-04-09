@@ -116,58 +116,7 @@ function parseWordUnitGroups(inputStr) {
     .filter((group) => group.length > 0);
 }
 
-/**
- * Phonics tab ONLY: parse graphemes by words first, then by grapheme separators.
- * - Word boundary: space between words
- * - Grapheme boundary inside word: • / | / ｜
- */
-function parsePhonicsWordGroupsForTab(graphemesStr) {
-  const raw = String(graphemesStr ?? '').trim();
-  if (!raw || raw === '-' || raw === '—') return [];
-  const wordGroups = raw.split(/\s+/).filter((g) => g.length > 0);
-  return wordGroups
-    .map((group) => group.split(/[•|\uFF5C|]/).map((u) => u.trim()).filter((u) => u.length > 0))
-    .filter((group) => group.length > 0);
-}
-
-function buildPhonicsWordGroupsBySyllableBoundary(graphemesRaw, syllablesRaw) {
-  const allGraphemes = String(graphemesRaw ?? '')
-    .replace(/\s+/g, '')
-    .split(/[•|\uFF5C|]/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  if (allGraphemes.length === 0) return [];
-
-  const syllableWords = String(syllablesRaw ?? '')
-    .trim()
-    .split(/\s+/)
-    .filter((w) => w.length > 0 && w !== '-' && w !== '—');
-  if (syllableWords.length <= 1) return [allGraphemes];
-
-  const counts = syllableWords
-    .map((w) =>
-      w
-        .replace(/\s+/g, '')
-        .split(/[•|\uFF5C|]/)
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0).length,
-    )
-    .filter((n) => n > 0);
-  if (counts.length <= 1) return [allGraphemes];
-
-  const groups = [];
-  let cursor = 0;
-  counts.forEach((count, idx) => {
-    if (idx === counts.length - 1) {
-      groups.push(allGraphemes.slice(cursor));
-      return;
-    }
-    groups.push(allGraphemes.slice(cursor, cursor + count));
-    cursor += count;
-  });
-  const nonEmpty = groups.filter((g) => g.length > 0);
-  return nonEmpty.length > 0 ? nonEmpty : [allGraphemes];
-}
+// Phonics tab uses dedicated state initialization effect below.
 
 function parseTileIndex(id) {
   const m = String(id ?? '').match(/-(\d+)-/);
@@ -191,48 +140,7 @@ function groupPoolByWordGroups(pool, wordGroups) {
   return out;
 }
 
-function groupPoolByWordGroupsInOrder(pool, wordGroups) {
-  if (!Array.isArray(pool) || pool.length === 0) return [];
-  const counts = wordGroups.map((g) => g.length).filter((n) => n > 0);
-  if (counts.length === 0) return [pool];
-  const out = [];
-  let cursor = 0;
-  counts.forEach((count) => {
-    const chunk = pool.slice(cursor, cursor + count);
-    if (chunk.length > 0) out.push(chunk);
-    cursor += count;
-  });
-  if (cursor < pool.length) out.push(pool.slice(cursor));
-  return out;
-}
-
-/** Phonics tab answer row: one slot per grapheme segment, plus a fixed space slot between words. */
-function buildPhonicsTabSlotBlueprintFromGroups(grouped) {
-  if (grouped.length === 0) {
-    return { kinds: [], expectedTexts: [] };
-  }
-  const kinds = [];
-  const expectedTexts = [];
-  grouped.forEach((g, wi) => {
-    g.forEach((seg) => {
-      kinds.push('grapheme');
-      expectedTexts.push(seg);
-    });
-    if (wi < grouped.length - 1) {
-      kinds.push('space');
-      expectedTexts.push(' ');
-    }
-  });
-  return { kinds, expectedTexts };
-}
-
-function graphemeSoundIndexForPhSlot(kinds, slotIdx) {
-  let n = 0;
-  for (let i = 0; i < slotIdx; i += 1) {
-    if (kinds[i] === 'grapheme') n += 1;
-  }
-  return n;
-}
+// Removed legacy phonics grouping helpers; Phonics tab now initializes from one effect.
 
 const stripPipeDisplay = (text) => (text ? String(text).replace(/\|/g, '') : '');
 
@@ -295,15 +203,15 @@ export default function PracticeScreen() {
   const params = useLocalSearchParams();
   const word = String(paramStr(params, 'word')).trim();
   const practiceWord = String(paramStr(params, 'practiceWord') || word).trim();
-  /** Syllable breakdown from learn card — Syllables tab ONLY. */
-  const syllables = String(paramStr(params, 'syllables')).trim();
+  /** Syllable breakdown from learn card — Syllables tab + Phonics tab (same route param). */
+  const syllablesRaw = paramStr(params, 'syllables') || '';
+  const syllables = syllablesRaw.trim();
   /** Grapheme-level rhythm string from learn card (not used for Syllables tab tiles). */
   const practicePhonics = String(paramStr(params, 'practicePhonics')).trim();
   /** Phonics sound units — Phonics tab ONLY. */
   const practiceGraphemes = String(paramStr(params, 'practiceGraphemes')).trim();
   /** Phonics tab raw breakdown field (learn_card_json fallback chain). */
   const phonicsTabRawField = useMemo(() => resolvePhonicsTabRawField(params), [params]);
-  const learnCardJSONParam = paramStr(params, 'learnCardJSON');
   /** Use syllables to recover phrase word boundaries for phonics grouping. */
   const phonicsBoundarySyllables = useMemo(
     () => resolvePhonicsBoundarySyllables(params, syllables),
@@ -356,9 +264,12 @@ export default function PracticeScreen() {
   const [sylSlots, setSylSlots] = useState([]);
   const [sylPool, setSylPool] = useState([]);
 
-  const [poolGroup0, setPoolGroup0] = useState([]);
-  const [poolGroup1, setPoolGroup1] = useState([]);
-  const [answerBoxes, setAnswerBoxes] = useState([]);
+  const [phGroup0, setPhGroup0] = useState([]);
+  const [phGroup1, setPhGroup1] = useState([]);
+  const [phAnswers, setPhAnswers] = useState([]);
+  const phInitializedFor = useRef(null);
+  const phSpaceIndexRef = useRef(-1);
+  const phExpectedRef = useRef([]);
 
   const [spellSlots, setSpellSlots] = useState([]);
   const [spellInventory, setSpellInventory] = useState({});
@@ -393,74 +304,34 @@ export default function PracticeScreen() {
     if (flatFromRhythm.length > 0) return flatFromRhythm;
     return parsePhonicsFlatPattern(String(practiceGraphemes ?? ''));
   }, [soundDisplayWordGroups, soundPhonicsByWord, practiceGraphemes]);
-  /** Phonics tab: derive word groups from graphemes raw (2+ spaces boundary), with syllables fallback. */
-  const phonicsGroupsForTab = useMemo(() => {
-    let learnCard = null;
-    const jsonRaw = learnCardJSONParam;
-    if (jsonRaw.trim()) {
-      try {
-        learnCard = JSON.parse(jsonRaw);
-      } catch {
-        learnCard = null;
-      }
-    }
-
-    const graphemesRaw = String(
-      learnCard?.practiceGraphemes ||
-        learnCard?.graphemes ||
-        phonicsTabRawField ||
-        practiceGraphemes ||
-        '',
-    ).trim();
-    if (!graphemesRaw || graphemesRaw === '-' || graphemesRaw === '—') return [];
-
-    const allGraphemes = graphemesRaw
-      .replace(/\s+/g, '')
-      .split(/[•|\uFF5C|]/)
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    if (allGraphemes.length === 0) return [];
-
-    const syllablesRaw = String(learnCard?.syllables || phonicsBoundarySyllables || syllables || '').trim();
-    const syllableWords = syllablesRaw.split(/\s+/).filter((w) => w.length > 0);
-
-    if (syllableWords.length >= 2) {
-      const originalTrimmed = graphemesRaw.trim();
-      const parts = originalTrimmed.split(/\s{2,}/).filter((p) => p.trim().length > 0);
-      if (parts.length >= 2) {
-        const group0 = parts[0]
-          .split(/[•|\uFF5C|]/)
-          .map((s) => s.trim())
-          .filter((s) => s.length > 0);
-        const group1 = parts[1]
-          .replace(/^[•|\uFF5C|]+/, '')
-          .split(/[•|\uFF5C|]/)
-          .map((s) => s.trim())
-          .filter((s) => s.length > 0);
-        if (group0.length > 0 && group1.length > 0) {
-          return [group0, group1];
-        }
-      }
-    }
-
-    return [allGraphemes];
-  }, [learnCardJSONParam, phonicsTabRawField, practiceGraphemes, phonicsBoundarySyllables, syllables]);
-  const phonicsGroupsKey = useMemo(
-    () => JSON.stringify(phonicsGroupsForTab ?? []),
-    [phonicsGroupsForTab],
-  );
-  const phonicsTabTotalBoxes = useMemo(() => {
-    if (phonicsGroupsForTab.length === 0) return 0;
-    const graphemeCount = phonicsGroupsForTab.reduce((sum, g) => sum + g.length, 0);
-    return graphemeCount + (phonicsGroupsForTab.length - 1);
-  }, [phonicsGroupsForTab]);
-  const phonicsTabBlueprint = useMemo(
-    () => buildPhonicsTabSlotBlueprintFromGroups(phonicsGroupsForTab),
-    [phonicsGroupsForTab],
-  );
   useEffect(() => {
-    console.log('[Phonics] phonicsGroupsForTab FIXED:', JSON.stringify(phonicsGroupsForTab));
-  }, [phonicsGroupsForTab]);
+    if (tab !== 'phonics') return;
+
+    const key = `phonics_${syllablesRaw}`;
+    if (phInitializedFor.current === key) return;
+    phInitializedFor.current = key;
+
+    const syllablesRaw = paramStr(params, 'syllables') || '';
+    console.log('[Phonics] syllablesRaw from params:', syllablesRaw);
+    // Expected: "rep•ri•man•ded se•vere•ly"
+
+    const syllableWords = syllablesRaw.trim().split(' ').filter((w) => w.length > 0);
+    const parseWord = (str) => str.split('•').filter((s) => s.length > 0);
+
+    const g0 = parseWord(syllableWords[0] || '');
+    const g1 = syllableWords.length > 1 ? parseWord(syllableWords[1]) : [];
+
+    console.log('[Phonics] g0:', g0);
+    console.log('[Phonics] g1:', g1);
+
+    const shuffle = (arr) => [...arr].sort(() => Math.random() - 0.5);
+    setPhGroup0(shuffle(g0));
+    setPhGroup1(shuffle(g1));
+    const totalBoxes = g0.length + (g1.length > 0 ? g1.length : 0);
+    setPhAnswers(new Array(totalBoxes).fill(null));
+    phSpaceIndexRef.current = g1.length > 0 ? g0.length : -1;
+    phExpectedRef.current = g1.length > 0 ? [...g0, ' ', ...g1] : [...g0];
+  }, [tab, syllablesRaw]);
   const syllablesWordGroups = useMemo(() => {
     const parsed = parseWordUnitGroups(syllables);
     if (parsed.length > 0) return parsed;
@@ -473,13 +344,9 @@ export default function PracticeScreen() {
     [sylPool, syllablesWordGroups],
   );
   useEffect(() => {
-    console.log('[Phonics] poolGroup0:', poolGroup0);
-    console.log('[Phonics] poolGroup1:', poolGroup1);
-  }, [poolGroup0, poolGroup1]);
-  const phonicsSpaceIndex = useMemo(
-    () => (phonicsGroupsForTab.length > 1 ? phonicsGroupsForTab[0].length : -1),
-    [phonicsGroupsForTab],
-  );
+    console.log('[Phonics] poolGroup0:', phGroup0);
+    console.log('[Phonics] poolGroup1:', phGroup1);
+  }, [phGroup0, phGroup1]);
   
   const blankedExample = useMemo(
     () => blankExampleSentence(exampleSentence, practiceWord),
@@ -616,35 +483,6 @@ export default function PracticeScreen() {
     setSylPool(shuffleArray(pool));
   }, [syllables, practiceWord]);
 
-  const resetPhonics = useCallback(() => {
-    let groups = [];
-    try {
-      const parsed = JSON.parse(phonicsGroupsKey);
-      groups = Array.isArray(parsed) ? parsed : [];
-    } catch {
-      groups = [];
-    }
-    if (!groups || groups.length === 0) {
-      setPoolGroup0([]);
-      setPoolGroup1([]);
-      setAnswerBoxes([]);
-      return;
-    }
-    if (!Array.isArray(groups[0]) || groups[0].length === 0) return;
-    const g0 = shuffleArray([...(groups[0] ?? [])]);
-    const g1 = groups.length > 1 ? shuffleArray([...(groups[1] ?? [])]) : [];
-    setPoolGroup0(g0);
-    setPoolGroup1(g1);
-    const totalBoxes =
-      (groups[0]?.length ?? 0) +
-      (groups.length > 1 ? 1 + (groups[1]?.length ?? 0) : 0);
-    setAnswerBoxes(new Array(totalBoxes).fill(null));
-  }, [phonicsGroupsKey]);
-
-  useEffect(() => {
-    resetPhonics();
-  }, [phonicsGroupsKey, resetPhonics]);
-
   const resetSpelling = useCallback(() => {
     const w = practiceWord.toLowerCase();
     const inv = {};
@@ -659,9 +497,8 @@ export default function PracticeScreen() {
   useEffect(() => {
     if (!practiceWord) return;
     resetSyllables();
-    resetPhonics();
     resetSpelling();
-  }, [practiceWord, syllables, practiceGraphemes, resetSyllables, resetPhonics, resetSpelling]);
+  }, [practiceWord, syllables, practiceGraphemes, resetSyllables, resetSpelling]);
 
   useEffect(() => {
     phonemeCacheRef.current = {};
@@ -800,18 +637,18 @@ export default function PracticeScreen() {
   };
 
   const onPhPoolTap = (item) => {
-    const idx = answerBoxes.findIndex((box, i) => i !== phonicsSpaceIndex && box == null);
+    const idx = phAnswers.findIndex((box, i) => i !== phSpaceIndexRef.current && box == null);
     if (idx === -1) return;
-    if (poolGroup0.includes(item)) {
-      setPoolGroup0((prev) => {
+    if (phGroup0.includes(item)) {
+      setPhGroup0((prev) => {
         const i = prev.indexOf(item);
         if (i === -1) return prev;
         const n = [...prev];
         n.splice(i, 1);
         return n;
       });
-    } else if (poolGroup1.includes(item)) {
-      setPoolGroup1((prev) => {
+    } else if (phGroup1.includes(item)) {
+      setPhGroup1((prev) => {
         const i = prev.indexOf(item);
         if (i === -1) return prev;
         const n = [...prev];
@@ -821,7 +658,7 @@ export default function PracticeScreen() {
     } else {
       return;
     }
-    setAnswerBoxes((prev) => {
+    setPhAnswers((prev) => {
       const n = [...prev];
       n[idx] = item;
       return n;
@@ -829,15 +666,15 @@ export default function PracticeScreen() {
   };
 
   const onPhSlotTap = (idx) => {
-    if (idx === phonicsSpaceIndex) return;
-    const slot = answerBoxes[idx];
+    if (idx === phSpaceIndexRef.current) return;
+    const slot = phAnswers[idx];
     if (!slot) return;
-    if (phonicsSpaceIndex >= 0 && idx > phonicsSpaceIndex) {
-      setPoolGroup1((prev) => [...prev, slot]);
+    if (phSpaceIndexRef.current >= 0 && idx > phSpaceIndexRef.current) {
+      setPhGroup1((prev) => [...prev, slot]);
     } else {
-      setPoolGroup0((prev) => [...prev, slot]);
+      setPhGroup0((prev) => [...prev, slot]);
     }
-    setAnswerBoxes((prev) => {
+    setPhAnswers((prev) => {
       const n = [...prev];
       n[idx] = null;
       return n;
@@ -893,13 +730,13 @@ export default function PracticeScreen() {
   };
 
   const checkPhonics = () => {
-    const complete = answerBoxes.every((box, i) => (i === phonicsSpaceIndex ? true : box != null));
+    const complete = phAnswers.every((box, i) => (i === phSpaceIndexRef.current ? true : box != null));
     if (!complete) return;
-    const { expectedTexts } = phonicsTabBlueprint;
+    const expectedTexts = phExpectedRef.current;
     if (expectedTexts.length === 0) return;
     const normTile = (t) => stripPipeDisplay(String(t ?? '')).toLowerCase();
     const expNorm = expectedTexts.map(normTile);
-    const got = answerBoxes.map((box, i) => (i === phonicsSpaceIndex ? normTile(' ') : normTile(box)));
+    const got = phAnswers.map((box, i) => (i === phSpaceIndexRef.current ? normTile(' ') : normTile(box)));
     const ok = got.length === expNorm.length && got.every((g, i) => g === expNorm[i]);
     if (ok) {
       playSuccessSound();
@@ -908,7 +745,14 @@ export default function PracticeScreen() {
       });
     } else {
       runShake(phShake);
-      resetPhonics();
+      const splitAt = phSpaceIndexRef.current;
+      const full = phExpectedRef.current.filter((x) => x !== ' ');
+      const left = splitAt >= 0 ? full.slice(0, splitAt) : full;
+      const right = splitAt >= 0 ? full.slice(splitAt) : [];
+      const shuffle = (arr) => [...arr].sort(() => Math.random() - 0.5);
+      setPhGroup0(shuffle(left));
+      setPhGroup1(shuffle(right));
+      setPhAnswers(new Array((left.length || 0) + (right.length || 0)).fill(null));
     }
   };
 
@@ -1036,11 +880,10 @@ export default function PracticeScreen() {
 
   const canCheckSyl = sylPool.every((x) => x.placed) && sylSlots.length > 0;
   const canCheckPh =
-    phonicsTabTotalBoxes > 0 &&
-    poolGroup0.length === 0 &&
-    (phonicsSpaceIndex < 0 ? true : poolGroup1.length === 0) &&
-    answerBoxes.length > 0 &&
-    answerBoxes.every((box, i) => (i === phonicsSpaceIndex ? true : box != null));
+    phAnswers.length > 0 &&
+    phGroup0.length === 0 &&
+    phGroup1.length === 0 &&
+    phAnswers.every((box, i) => (i === phSpaceIndexRef.current ? true : box != null));
   const canCheckSp = !spellSlots.some((x) => x == null) && practiceWord.length > 0;
 
   const showCheckButton =
@@ -1260,7 +1103,7 @@ export default function PracticeScreen() {
         ) : null}
 
         {tab === 'phonics' ? (
-          phonicsGroupsForTab.length === 0 ? (
+          phAnswers.length === 0 && phGroup0.length === 0 && phGroup1.length === 0 ? (
             <View style={styles.section}>
               <Text style={styles.phonicsMissingText}>
                 Phonics groups are missing (practiceGraphemes was not loaded). Go back to Learn and open this word
@@ -1279,15 +1122,13 @@ export default function PracticeScreen() {
               <Animated.View style={{ transform: [{ translateX: phShake }] }}>
                 <Animated.View style={[styles.slotWrap, { backgroundColor: flashBg(phFlash) }]}>
                   <View style={styles.phAnswerRow}>
-                    {Array.from({ length: phonicsTabTotalBoxes }).map((_, idx) => {
-                      const kind = phonicsTabBlueprint.kinds[idx] ?? 'grapheme';
-                      if (kind === 'space') {
+                    {phAnswers.map((slot, idx) => {
+                      if (idx === phSpaceIndexRef.current) {
                         return (
                           <View key={`ph-answer-space-${idx}`} style={styles.phAnswerSpaceGap} pointerEvents="none" />
                         );
                       }
-                      const slot = answerBoxes[idx];
-                      const soundIdx = phonicsSpaceIndex >= 0 && idx > phonicsSpaceIndex ? idx - 1 : idx;
+                      const soundIdx = phSpaceIndexRef.current >= 0 && idx > phSpaceIndexRef.current ? idx - 1 : idx;
                       return (
                         <Pressable
                           key={`ph-slot-${idx}`}
@@ -1313,7 +1154,7 @@ export default function PracticeScreen() {
               </Animated.View>
               <View style={styles.phPoolColumn}>
                 <View style={styles.phPoolWordRow}>
-                  {poolGroup0.map((item, i) => (
+                  {phGroup0.map((item, i) => (
                     <TouchableOpacity
                       key={`ph-g0-${i}-${item}`}
                       style={styles.phPoolTile}
@@ -1324,7 +1165,7 @@ export default function PracticeScreen() {
                     </TouchableOpacity>
                   ))}
                 </View>
-                {poolGroup1.length > 0 ? (
+                {phGroup1.length > 0 ? (
                   <>
                     <View style={styles.phPoolWordDivider}>
                       <View style={styles.phPoolWordDividerLineRow}>
@@ -1333,7 +1174,7 @@ export default function PracticeScreen() {
                       <Text style={styles.phPoolWordDividerText}>—— space ——</Text>
                     </View>
                     <View style={styles.phPoolWordRow}>
-                      {poolGroup1.map((item, i) => (
+                      {phGroup1.map((item, i) => (
                         <TouchableOpacity
                           key={`ph-g1-${i}-${item}`}
                           style={styles.phPoolTile}

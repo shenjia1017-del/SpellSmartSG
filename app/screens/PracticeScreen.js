@@ -74,13 +74,164 @@ function shuffleArray(arr) {
   return a;
 }
 
-/** Learn card strings may use •, |, ｜, or - between segments (Claude varies). */
-function splitPracticePhonicsSegments(phonicsStr) {
-  if (!phonicsStr || phonicsStr === '—') return [];
-  return phonicsStr
-    .split(/[•|\uFF5C-]/)
-    .filter((item) => item.trim().length > 0)
-    .map((item) => item.trim());
+/**
+ * Phonics tab: spaces separate words; • / | / ｜ separate graphemes within a word.
+ * Returns a flat array of grapheme strings only (no spacer entries).
+ */
+function parsePhonicsFlatPattern(graphemesStr) {
+  if (!graphemesStr || graphemesStr === '-' || graphemesStr === '—') return [];
+  return graphemesStr
+    .trim()
+    .split(/\s+/)
+    .flatMap((word) => word.split(/[•|\uFF5C|]/).map((s) => s.trim()).filter(Boolean));
+}
+
+/**
+ * Syllables tab: spaces separate words; • / | / ｜ separate syllables within a word.
+ * Returns a flat array of syllable strings only (no spacer entries).
+ * Example: "rep•ri•man•ded se•vere•ly" → ["rep","ri","man","ded","se","vere","ly"]
+ */
+function parseSyllablesTabPattern(syllablesStr) {
+  if (!syllablesStr || syllablesStr === '-' || syllablesStr === '—') return [];
+  return syllablesStr
+    .trim()
+    .split(/\s+/)
+    .flatMap((word) => word.split(/[•|\uFF5C|]/).map((s) => s.trim()).filter(Boolean));
+}
+
+function syllablesTileList(syllablesStr, practiceWordFallback) {
+  const flat = parseSyllablesTabPattern(syllablesStr);
+  if (flat.length > 0) return flat;
+  const w = String(practiceWordFallback ?? '').trim();
+  if (!w) return [];
+  return w.split(/\s+/).filter(Boolean);
+}
+
+function parseWordUnitGroups(inputStr) {
+  const s = String(inputStr ?? '').trim();
+  if (!s || s === '-' || s === '—') return [];
+  return s
+    .split(/\s+/)
+    .map((word) => word.split(/[•|\uFF5C|]/).map((u) => u.trim()).filter(Boolean))
+    .filter((group) => group.length > 0);
+}
+
+/**
+ * Phonics tab ONLY: parse graphemes by words first, then by grapheme separators.
+ * - Word boundary: space between words
+ * - Grapheme boundary inside word: • / | / ｜
+ */
+function parsePhonicsWordGroupsForTab(graphemesStr) {
+  const raw = String(graphemesStr ?? '').trim();
+  if (!raw || raw === '-' || raw === '—') return [];
+  const wordGroups = raw.split(/\s+/).filter((g) => g.length > 0);
+  return wordGroups
+    .map((group) => group.split(/[•|\uFF5C|]/).map((u) => u.trim()).filter((u) => u.length > 0))
+    .filter((group) => group.length > 0);
+}
+
+function buildPhonicsWordGroupsBySyllableBoundary(graphemesRaw, syllablesRaw) {
+  const allGraphemes = String(graphemesRaw ?? '')
+    .replace(/\s+/g, '')
+    .split(/[•|\uFF5C|]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (allGraphemes.length === 0) return [];
+
+  const syllableWords = String(syllablesRaw ?? '')
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 0 && w !== '-' && w !== '—');
+  if (syllableWords.length <= 1) return [allGraphemes];
+
+  const counts = syllableWords
+    .map((w) =>
+      w
+        .replace(/\s+/g, '')
+        .split(/[•|\uFF5C|]/)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0).length,
+    )
+    .filter((n) => n > 0);
+  if (counts.length <= 1) return [allGraphemes];
+
+  const groups = [];
+  let cursor = 0;
+  counts.forEach((count, idx) => {
+    if (idx === counts.length - 1) {
+      groups.push(allGraphemes.slice(cursor));
+      return;
+    }
+    groups.push(allGraphemes.slice(cursor, cursor + count));
+    cursor += count;
+  });
+  const nonEmpty = groups.filter((g) => g.length > 0);
+  return nonEmpty.length > 0 ? nonEmpty : [allGraphemes];
+}
+
+function parseTileIndex(id) {
+  const m = String(id ?? '').match(/-(\d+)-/);
+  if (!m) return Number.MAX_SAFE_INTEGER;
+  return Number(m[1]);
+}
+
+function groupPoolByWordGroups(pool, wordGroups) {
+  if (!Array.isArray(pool) || pool.length === 0) return [];
+  const counts = wordGroups.map((g) => g.length).filter((n) => n > 0);
+  if (counts.length === 0) return [pool];
+  const ordered = [...pool].sort((a, b) => parseTileIndex(a.id) - parseTileIndex(b.id));
+  const out = [];
+  let cursor = 0;
+  counts.forEach((count) => {
+    const chunk = ordered.slice(cursor, cursor + count);
+    if (chunk.length > 0) out.push(chunk);
+    cursor += count;
+  });
+  if (cursor < ordered.length) out.push(ordered.slice(cursor));
+  return out;
+}
+
+function groupPoolByWordGroupsInOrder(pool, wordGroups) {
+  if (!Array.isArray(pool) || pool.length === 0) return [];
+  const counts = wordGroups.map((g) => g.length).filter((n) => n > 0);
+  if (counts.length === 0) return [pool];
+  const out = [];
+  let cursor = 0;
+  counts.forEach((count) => {
+    const chunk = pool.slice(cursor, cursor + count);
+    if (chunk.length > 0) out.push(chunk);
+    cursor += count;
+  });
+  if (cursor < pool.length) out.push(pool.slice(cursor));
+  return out;
+}
+
+/** Phonics tab answer row: one slot per grapheme segment, plus a fixed space slot between words. */
+function buildPhonicsTabSlotBlueprintFromGroups(grouped) {
+  if (grouped.length === 0) {
+    return { kinds: [], expectedTexts: [] };
+  }
+  const kinds = [];
+  const expectedTexts = [];
+  grouped.forEach((g, wi) => {
+    g.forEach((seg) => {
+      kinds.push('grapheme');
+      expectedTexts.push(seg);
+    });
+    if (wi < grouped.length - 1) {
+      kinds.push('space');
+      expectedTexts.push(' ');
+    }
+  });
+  return { kinds, expectedTexts };
+}
+
+function graphemeSoundIndexForPhSlot(kinds, slotIdx) {
+  let n = 0;
+  for (let i = 0; i < slotIdx; i += 1) {
+    if (kinds[i] === 'grapheme') n += 1;
+  }
+  return n;
 }
 
 const stripPipeDisplay = (text) => (text ? String(text).replace(/\|/g, '') : '');
@@ -94,16 +245,70 @@ function paramStr(params, key) {
   return Array.isArray(v) ? String(v[0] ?? '') : String(v);
 }
 
+function resolvePhonicsTabRawField(params) {
+  const jsonRaw = paramStr(params, 'learnCardJSON');
+  if (jsonRaw.trim()) {
+    try {
+      const learnCard = JSON.parse(jsonRaw);
+      const rawField =
+        learnCard?.graphemes ||
+        learnCard?.phonics ||
+        learnCard?.phoneticBreakdown ||
+        '';
+      const s = String(rawField ?? '').trim();
+      if (s && s !== '-' && s !== '—') return s;
+    } catch {
+      // ignore invalid learnCardJSON
+    }
+  }
+  const directCandidates = [
+    paramStr(params, 'graphemes'),
+    paramStr(params, 'phonics'),
+    paramStr(params, 'phoneticBreakdown'),
+    paramStr(params, 'practiceGraphemes'),
+  ];
+  for (const raw of directCandidates) {
+    const s = String(raw ?? '').trim();
+    if (s && s !== '-' && s !== '—') return s;
+  }
+  return '';
+}
+
+function resolvePhonicsBoundarySyllables(params, currentSyllables) {
+  const direct = String(currentSyllables ?? '').trim();
+  if (direct && direct !== '-' && direct !== '—') return direct;
+  const jsonRaw = paramStr(params, 'learnCardJSON');
+  if (!jsonRaw.trim()) return '';
+  try {
+    const learnCard = JSON.parse(jsonRaw);
+    const fromJson = String(learnCard?.syllables ?? '').trim();
+    if (fromJson && fromJson !== '-' && fromJson !== '—') return fromJson;
+  } catch {
+    // ignore invalid learnCardJSON
+  }
+  return '';
+}
+
 export default function PracticeScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const params = useLocalSearchParams();
   const word = String(paramStr(params, 'word')).trim();
   const practiceWord = String(paramStr(params, 'practiceWord') || word).trim();
-  /** Syllable/rhythm splits — Syllables tab ONLY. */
+  /** Syllable breakdown from learn card — Syllables tab ONLY. */
+  const syllables = String(paramStr(params, 'syllables')).trim();
+  /** Grapheme-level rhythm string from learn card (not used for Syllables tab tiles). */
   const practicePhonics = String(paramStr(params, 'practicePhonics')).trim();
-  /** Phonics sound units — Phonics tab ONLY (never use practicePhonics here). */
+  /** Phonics sound units — Phonics tab ONLY. */
   const practiceGraphemes = String(paramStr(params, 'practiceGraphemes')).trim();
+  /** Phonics tab raw breakdown field (learn_card_json fallback chain). */
+  const phonicsTabRawField = useMemo(() => resolvePhonicsTabRawField(params), [params]);
+  const learnCardJSONParam = paramStr(params, 'learnCardJSON');
+  /** Use syllables to recover phrase word boundaries for phonics grouping. */
+  const phonicsBoundarySyllables = useMemo(
+    () => resolvePhonicsBoundarySyllables(params, syllables),
+    [params, syllables],
+  );
   const definitions = useMemo(() => {
     const raw = paramStr(params, 'definitionsJSON');
     if (!raw.trim()) return [];
@@ -151,8 +356,9 @@ export default function PracticeScreen() {
   const [sylSlots, setSylSlots] = useState([]);
   const [sylPool, setSylPool] = useState([]);
 
-  const [phSlots, setPhSlots] = useState([]);
-  const [phPool, setPhPool] = useState([]);
+  const [poolGroup0, setPoolGroup0] = useState([]);
+  const [poolGroup1, setPoolGroup1] = useState([]);
+  const [answerBoxes, setAnswerBoxes] = useState([]);
 
   const [spellSlots, setSpellSlots] = useState([]);
   const [spellInventory, setSpellInventory] = useState({});
@@ -164,17 +370,122 @@ export default function PracticeScreen() {
   const [fillInCorrect, setFillInCorrect] = useState(false);
   const [fillInWrongIndex, setFillInWrongIndex] = useState(null);
 
-  /** Phonics tab tiles: ONLY `practiceGraphemes`, split by •, |, ｜, or -. */
-  const phonicsGroups = useMemo(
-    () => splitPracticePhonicsSegments(practiceGraphemes),
-    [practiceGraphemes],
+  /** Words in the practice phrase (space = boundary). */
+  const practiceWordWords = useMemo(
+    () => practiceWord.trim().split(/\s+/).filter(Boolean),
+    [practiceWord],
   );
+  /** practicePhonics / practiceGraphemes split by spaces = one string per word, then •/|/｜ within word. */
+  const soundPhonicsByWord = useMemo(() => parseWordUnitGroups(practicePhonics), [practicePhonics]);
+  const graphemesByWord = useMemo(() => parseWordUnitGroups(practiceGraphemes), [practiceGraphemes]);
+  /** Sound tab: only split into rows + separator when word count matches practiceWord (avoids spurious spaces in data). */
+  const soundDisplayWordGroups = useMemo(() => {
+    const n = practiceWordWords.length;
+    if (n <= 1) return null;
+    if (soundPhonicsByWord.length === n) return soundPhonicsByWord;
+    if (graphemesByWord.length === n) return graphemesByWord;
+    return null;
+  }, [practiceWordWords, soundPhonicsByWord, graphemesByWord]);
+  /** Flat list for TTS cache + indices (same order as on-screen tiles). */
+  const phonicsGroups = useMemo(() => {
+    if (soundDisplayWordGroups) return soundDisplayWordGroups.flat();
+    const flatFromRhythm = soundPhonicsByWord.flat();
+    if (flatFromRhythm.length > 0) return flatFromRhythm;
+    return parsePhonicsFlatPattern(String(practiceGraphemes ?? ''));
+  }, [soundDisplayWordGroups, soundPhonicsByWord, practiceGraphemes]);
+  /** Phonics tab: derive word groups from graphemes raw (2+ spaces boundary), with syllables fallback. */
+  const phonicsGroupsForTab = useMemo(() => {
+    let learnCard = null;
+    const jsonRaw = learnCardJSONParam;
+    if (jsonRaw.trim()) {
+      try {
+        learnCard = JSON.parse(jsonRaw);
+      } catch {
+        learnCard = null;
+      }
+    }
 
+    const graphemesRaw = String(
+      learnCard?.practiceGraphemes ||
+        learnCard?.graphemes ||
+        phonicsTabRawField ||
+        practiceGraphemes ||
+        '',
+    ).trim();
+    if (!graphemesRaw || graphemesRaw === '-' || graphemesRaw === '—') return [];
+
+    const allGraphemes = graphemesRaw
+      .replace(/\s+/g, '')
+      .split(/[•|\uFF5C|]/)
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (allGraphemes.length === 0) return [];
+
+    const syllablesRaw = String(learnCard?.syllables || phonicsBoundarySyllables || syllables || '').trim();
+    const syllableWords = syllablesRaw.split(/\s+/).filter((w) => w.length > 0);
+
+    if (syllableWords.length >= 2) {
+      const originalTrimmed = graphemesRaw.trim();
+      const parts = originalTrimmed.split(/\s{2,}/).filter((p) => p.trim().length > 0);
+      if (parts.length >= 2) {
+        const group0 = parts[0]
+          .split(/[•|\uFF5C|]/)
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+        const group1 = parts[1]
+          .replace(/^[•|\uFF5C|]+/, '')
+          .split(/[•|\uFF5C|]/)
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+        if (group0.length > 0 && group1.length > 0) {
+          return [group0, group1];
+        }
+      }
+    }
+
+    return [allGraphemes];
+  }, [learnCardJSONParam, phonicsTabRawField, practiceGraphemes, phonicsBoundarySyllables, syllables]);
+  const phonicsGroupsKey = useMemo(
+    () => JSON.stringify(phonicsGroupsForTab ?? []),
+    [phonicsGroupsForTab],
+  );
+  const phonicsTabTotalBoxes = useMemo(() => {
+    if (phonicsGroupsForTab.length === 0) return 0;
+    const graphemeCount = phonicsGroupsForTab.reduce((sum, g) => sum + g.length, 0);
+    return graphemeCount + (phonicsGroupsForTab.length - 1);
+  }, [phonicsGroupsForTab]);
+  const phonicsTabBlueprint = useMemo(
+    () => buildPhonicsTabSlotBlueprintFromGroups(phonicsGroupsForTab),
+    [phonicsGroupsForTab],
+  );
+  useEffect(() => {
+    console.log('[Phonics] phonicsGroupsForTab FIXED:', JSON.stringify(phonicsGroupsForTab));
+  }, [phonicsGroupsForTab]);
+  const syllablesWordGroups = useMemo(() => {
+    const parsed = parseWordUnitGroups(syllables);
+    if (parsed.length > 0) return parsed;
+    const words = practiceWord.split(/\s+/).filter(Boolean);
+    if (words.length === 0) return [];
+    return words.map((w) => [w]);
+  }, [syllables, practiceWord]);
+  const groupedSylPool = useMemo(
+    () => groupPoolByWordGroups(sylPool, syllablesWordGroups),
+    [sylPool, syllablesWordGroups],
+  );
+  useEffect(() => {
+    console.log('[Phonics] poolGroup0:', poolGroup0);
+    console.log('[Phonics] poolGroup1:', poolGroup1);
+  }, [poolGroup0, poolGroup1]);
+  const phonicsSpaceIndex = useMemo(
+    () => (phonicsGroupsForTab.length > 1 ? phonicsGroupsForTab[0].length : -1),
+    [phonicsGroupsForTab],
+  );
+  
   const blankedExample = useMemo(
     () => blankExampleSentence(exampleSentence, practiceWord),
     [exampleSentence, practiceWord],
   );
-
+  
   const loadFillInChoices = useCallback(async () => {
     setFillInLoading(true);
     try {
@@ -233,13 +544,14 @@ export default function PracticeScreen() {
   }, [tab]);
 
   useEffect(() => {
-    console.log('[Practice] practicePhonics (syllables):', practicePhonics);
+    console.log('[Practice] syllables (Syllables tab):', syllables);
+    console.log('[Practice] practicePhonics (grapheme rhythm):', practicePhonics);
     console.log('[Practice] practiceGraphemes (phonics):', practiceGraphemes);
     console.log(
       '[Practice] breakdowns differ?',
       practicePhonics.replace(/\s/g, '') !== practiceGraphemes.replace(/\s/g, ''),
     );
-  }, [practiceWord, practicePhonics, practiceGraphemes]);
+  }, [practiceWord, syllables, practicePhonics, practiceGraphemes]);
 
   useEffect(() => {
     void Audio.setAudioModeAsync({
@@ -294,11 +606,7 @@ export default function PracticeScreen() {
   }, [navigation]);
 
   const resetSyllables = useCallback(() => {
-    const list = splitPracticePhonicsSegments(practicePhonics).length
-      ? splitPracticePhonicsSegments(practicePhonics)
-      : practiceWord
-        ? [practiceWord]
-        : [];
+    const list = syllablesTileList(syllables, practiceWord);
     const pool = list.map((text, i) => ({
       id: `syl-${i}-${text}`,
       text,
@@ -306,23 +614,36 @@ export default function PracticeScreen() {
     }));
     setSylSlots(Array(list.length).fill(null));
     setSylPool(shuffleArray(pool));
-  }, [practicePhonics, practiceWord]);
+  }, [syllables, practiceWord]);
 
   const resetPhonics = useCallback(() => {
-    const gr = splitPracticePhonicsSegments(practiceGraphemes);
-    if (gr.length === 0) {
-      setPhSlots([]);
-      setPhPool([]);
+    let groups = [];
+    try {
+      const parsed = JSON.parse(phonicsGroupsKey);
+      groups = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      groups = [];
+    }
+    if (!groups || groups.length === 0) {
+      setPoolGroup0([]);
+      setPoolGroup1([]);
+      setAnswerBoxes([]);
       return;
     }
-    const pool = gr.map((text, i) => ({
-      id: `gr-${i}-${text}`,
-      text,
-      placed: false,
-    }));
-    setPhSlots(Array(gr.length).fill(null));
-    setPhPool(shuffleArray(pool));
-  }, [practiceGraphemes]);
+    if (!Array.isArray(groups[0]) || groups[0].length === 0) return;
+    const g0 = shuffleArray([...(groups[0] ?? [])]);
+    const g1 = groups.length > 1 ? shuffleArray([...(groups[1] ?? [])]) : [];
+    setPoolGroup0(g0);
+    setPoolGroup1(g1);
+    const totalBoxes =
+      (groups[0]?.length ?? 0) +
+      (groups.length > 1 ? 1 + (groups[1]?.length ?? 0) : 0);
+    setAnswerBoxes(new Array(totalBoxes).fill(null));
+  }, [phonicsGroupsKey]);
+
+  useEffect(() => {
+    resetPhonics();
+  }, [phonicsGroupsKey, resetPhonics]);
 
   const resetSpelling = useCallback(() => {
     const w = practiceWord.toLowerCase();
@@ -340,7 +661,7 @@ export default function PracticeScreen() {
     resetSyllables();
     resetPhonics();
     resetSpelling();
-  }, [practiceWord, practicePhonics, practiceGraphemes, resetSyllables, resetPhonics, resetSpelling]);
+  }, [practiceWord, syllables, practiceGraphemes, resetSyllables, resetPhonics, resetSpelling]);
 
   useEffect(() => {
     phonemeCacheRef.current = {};
@@ -460,12 +781,13 @@ export default function PracticeScreen() {
 
   const checkSyllables = () => {
     if (!sylSlots.every(Boolean)) return;
-    const parts = splitPracticePhonicsSegments(practicePhonics);
-    const expected =
-      parts.length > 0 ? parts.map((s) => s.toLowerCase()) : [practiceWord.toLowerCase()];
+    let expected = syllablesTileList(syllables, practiceWord);
+    if (expected.length === 0) {
+      expected = practiceWord.trim() ? [practiceWord.trim()] : [];
+    }
+    const expLower = expected.map((s) => s.toLowerCase());
     const got = sylSlots.map((s) => s.text.toLowerCase());
-    const ok =
-      got.length === expected.length && got.every((g, i) => g === expected[i]);
+    const ok = got.length === expLower.length && got.every((g, i) => g === expLower[i]);
     if (ok) {
       playSuccessSound();
       runGreenFlash(sylFlash, () => {
@@ -478,23 +800,45 @@ export default function PracticeScreen() {
   };
 
   const onPhPoolTap = (item) => {
-    if (item.placed) return;
-    const idx = phSlots.findIndex((s) => s == null);
+    const idx = answerBoxes.findIndex((box, i) => i !== phonicsSpaceIndex && box == null);
     if (idx === -1) return;
-    setPhPool((p) => p.map((x) => (x.id === item.id ? { ...x, placed: true } : x)));
-    setPhSlots((s) => {
-      const n = [...s];
-      n[idx] = { id: item.id, text: item.text };
+    if (poolGroup0.includes(item)) {
+      setPoolGroup0((prev) => {
+        const i = prev.indexOf(item);
+        if (i === -1) return prev;
+        const n = [...prev];
+        n.splice(i, 1);
+        return n;
+      });
+    } else if (poolGroup1.includes(item)) {
+      setPoolGroup1((prev) => {
+        const i = prev.indexOf(item);
+        if (i === -1) return prev;
+        const n = [...prev];
+        n.splice(i, 1);
+        return n;
+      });
+    } else {
+      return;
+    }
+    setAnswerBoxes((prev) => {
+      const n = [...prev];
+      n[idx] = item;
       return n;
     });
   };
 
   const onPhSlotTap = (idx) => {
-    const slot = phSlots[idx];
+    if (idx === phonicsSpaceIndex) return;
+    const slot = answerBoxes[idx];
     if (!slot) return;
-    setPhPool((p) => p.map((x) => (x.id === slot.id ? { ...x, placed: false } : x)));
-    setPhSlots((s) => {
-      const n = [...s];
+    if (phonicsSpaceIndex >= 0 && idx > phonicsSpaceIndex) {
+      setPoolGroup1((prev) => [...prev, slot]);
+    } else {
+      setPoolGroup0((prev) => [...prev, slot]);
+    }
+    setAnswerBoxes((prev) => {
+      const n = [...prev];
       n[idx] = null;
       return n;
     });
@@ -549,9 +893,15 @@ export default function PracticeScreen() {
   };
 
   const checkPhonics = () => {
-    if (!phSlots.every(Boolean)) return;
-    const built = phSlots.map((s) => s.text).join('');
-    if (built.toLowerCase() === practiceWord.toLowerCase()) {
+    const complete = answerBoxes.every((box, i) => (i === phonicsSpaceIndex ? true : box != null));
+    if (!complete) return;
+    const { expectedTexts } = phonicsTabBlueprint;
+    if (expectedTexts.length === 0) return;
+    const normTile = (t) => stripPipeDisplay(String(t ?? '')).toLowerCase();
+    const expNorm = expectedTexts.map(normTile);
+    const got = answerBoxes.map((box, i) => (i === phonicsSpaceIndex ? normTile(' ') : normTile(box)));
+    const ok = got.length === expNorm.length && got.every((g, i) => g === expNorm[i]);
+    if (ok) {
       playSuccessSound();
       runGreenFlash(phFlash, () => {
         setTimeout(() => setTab('fill'), 1000);
@@ -686,7 +1036,11 @@ export default function PracticeScreen() {
 
   const canCheckSyl = sylPool.every((x) => x.placed) && sylSlots.length > 0;
   const canCheckPh =
-    phonicsGroups.length > 0 && phPool.every((x) => x.placed) && phSlots.length > 0;
+    phonicsTabTotalBoxes > 0 &&
+    poolGroup0.length === 0 &&
+    (phonicsSpaceIndex < 0 ? true : poolGroup1.length === 0) &&
+    answerBoxes.length > 0 &&
+    answerBoxes.every((box, i) => (i === phonicsSpaceIndex ? true : box != null));
   const canCheckSp = !spellSlots.some((x) => x == null) && practiceWord.length > 0;
 
   const showCheckButton =
@@ -777,27 +1131,71 @@ export default function PracticeScreen() {
           ) : (
             <View style={styles.section}>
               <Text style={styles.sectionHint}>Tap each sound block to hear it</Text>
-              <View style={styles.soundCardWrap}>
-                {phonicsGroups.map((gr, i) => {
-                  const pronSmall =
-                    resolvePhonicsTtsInput(gr, graphemesPronunciation) || gr;
-                  const displayGrapheme = stripPipeDisplay(gr);
-                  const displayPron = stripPipeDisplay(pronSmall);
-                  return (
-                    <TouchableOpacity
-                      key={`sound-${i}-${gr}`}
-                      style={styles.soundCard}
-                      onPress={() => void playPhonemeSoundAtIndex(i)}
-                      activeOpacity={0.75}
-                    >
-                      <Text style={styles.soundCardGrapheme}>{displayGrapheme}</Text>
-                      <Text style={styles.soundCardPron} numberOfLines={2}>
-                        {displayPron}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
+              {soundDisplayWordGroups ? (
+                <>
+                  {(() => {
+                    let soundIdx = 0;
+                    return soundDisplayWordGroups.map((group, wi) => (
+                      <React.Fragment key={`sound-w-${wi}`}>
+                        <View style={styles.soundCardWrap}>
+                          {group.map((gr) => {
+                            const tileIdx = soundIdx;
+                            soundIdx += 1;
+                            const pronSmall =
+                              resolvePhonicsTtsInput(gr, graphemesPronunciation) || gr;
+                            const displayGrapheme = stripPipeDisplay(gr);
+                            const displayPron = stripPipeDisplay(pronSmall);
+                            return (
+                              <TouchableOpacity
+                                key={`sound-${tileIdx}-${gr}`}
+                                style={styles.soundCard}
+                                onPress={() => void playPhonemeSoundAtIndex(tileIdx)}
+                                activeOpacity={0.75}
+                              >
+                                <Text style={styles.soundCardGrapheme}>{displayGrapheme}</Text>
+                                <Text style={styles.soundCardPron} numberOfLines={2}>
+                                  {displayPron}
+                                </Text>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                        {wi < soundDisplayWordGroups.length - 1 ? (
+                          <View
+                            style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 8 }}
+                          >
+                            <View style={{ flex: 1, height: 0.5, backgroundColor: '#ccc' }} />
+                            <Text style={{ fontSize: 11, color: '#aaa', paddingHorizontal: 8 }}>space</Text>
+                            <View style={{ flex: 1, height: 0.5, backgroundColor: '#ccc' }} />
+                          </View>
+                        ) : null}
+                      </React.Fragment>
+                    ));
+                  })()}
+                </>
+              ) : (
+                <View style={styles.soundCardWrap}>
+                  {phonicsGroups.map((gr, i) => {
+                    const pronSmall =
+                      resolvePhonicsTtsInput(gr, graphemesPronunciation) || gr;
+                    const displayGrapheme = stripPipeDisplay(gr);
+                    const displayPron = stripPipeDisplay(pronSmall);
+                    return (
+                      <TouchableOpacity
+                        key={`sound-${i}-${gr}`}
+                        style={styles.soundCard}
+                        onPress={() => void playPhonemeSoundAtIndex(i)}
+                        activeOpacity={0.75}
+                      >
+                        <Text style={styles.soundCardGrapheme}>{displayGrapheme}</Text>
+                        <Text style={styles.soundCardPron} numberOfLines={2}>
+                          {displayPron}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
               <View style={styles.soundNavRow}>
                 <TouchableOpacity style={styles.soundNextBtn} onPress={() => setTab('syllables')}>
                   <Text style={styles.soundNextBtnText}>Next →</Text>
@@ -821,37 +1219,48 @@ export default function PracticeScreen() {
                 ]}
               >
                 <View style={styles.slotRow}>
-                {sylSlots.map((slot, idx) => (
-                  <TouchableOpacity
-                    key={`syl-${idx}`}
-                    style={[styles.sylSlot, slot && styles.sylSlotFilled]}
-                    onPress={() => onSylSlotTap(idx)}
-                  >
-                    <Text style={styles.slotText}>{slot ? stripPipeDisplay(slot.text) : ''}</Text>
-                  </TouchableOpacity>
-                ))}
+                  {sylSlots.map((slot, idx) => (
+                    <TouchableOpacity
+                      key={`syl-slot-${idx}`}
+                      style={[styles.sylSlot, slot && styles.sylSlotFilled]}
+                      onPress={() => onSylSlotTap(idx)}
+                    >
+                      <Text style={styles.slotText}>{slot ? stripPipeDisplay(slot.text) : ''}</Text>
+                    </TouchableOpacity>
+                  ))}
                 </View>
               </Animated.View>
             </Animated.View>
             <View style={styles.tileWrap}>
-              {sylPool.map((item) => (
-                <TouchableOpacity
-                  key={item.id}
-                  style={[styles.tile, item.placed && styles.tileGhost]}
-                  onPress={() => onSylPoolTap(item)}
-                  disabled={item.placed}
-                >
-                  <Text style={[styles.tileText, item.placed && styles.tileTextGhost]}>
-                    {stripPipeDisplay(item.text)}
-                  </Text>
-                </TouchableOpacity>
+              {groupedSylPool.map((group, groupIdx) => (
+                <React.Fragment key={`syl-group-${groupIdx}`}>
+                  {group.map((item) => (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={[styles.tile, item.placed && styles.tileGhost]}
+                      onPress={() => onSylPoolTap(item)}
+                      disabled={item.placed}
+                    >
+                      <Text style={[styles.tileText, item.placed && styles.tileTextGhost]}>
+                        {stripPipeDisplay(item.text)}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                  {groupIdx < groupedSylPool.length - 1 ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%', marginVertical: 8 }}>
+                      <View style={{ flex: 1, height: 0.5, backgroundColor: '#ccc' }} />
+                      <Text style={{ fontSize: 11, color: '#aaa', paddingHorizontal: 8 }}>space</Text>
+                      <View style={{ flex: 1, height: 0.5, backgroundColor: '#ccc' }} />
+                    </View>
+                  ) : null}
+                </React.Fragment>
               ))}
             </View>
           </View>
         ) : null}
 
         {tab === 'phonics' ? (
-          phonicsGroups.length === 0 ? (
+          phonicsGroupsForTab.length === 0 ? (
             <View style={styles.section}>
               <Text style={styles.phonicsMissingText}>
                 Phonics groups are missing (practiceGraphemes was not loaded). Go back to Learn and open this word
@@ -864,47 +1273,79 @@ export default function PracticeScreen() {
           ) : (
             <View style={styles.section}>
               <Text style={styles.sectionHint}>
-                Build with the phonics groups from your card. Tap an empty box to hear that group. Tap a filled
-                box to put the tile back.
+                Build with grapheme tiles from your card. Tap the next empty box to hear that sound. Tap a filled
+                box to return the tile to the bank. The word break is fixed — only grapheme tiles move.
               </Text>
               <Animated.View style={{ transform: [{ translateX: phShake }] }}>
                 <Animated.View style={[styles.slotWrap, { backgroundColor: flashBg(phFlash) }]}>
-                  <View style={styles.phSlotRow}>
-                    {phSlots.map((slot, idx) => (
-                      <Pressable
-                        key={`ph-${idx}`}
-                        style={({ pressed }) => [
-                          styles.phBox,
-                          slot ? styles.phBoxFilled : styles.phBoxEmpty,
-                          pressed && styles.phBoxPressed,
-                        ]}
-                        onPress={() => {
-                          if (slot) {
-                            onPhSlotTap(idx);
-                          } else {
-                            void playPhonemeSoundAtIndex(idx);
-                          }
-                        }}
-                      >
-                        <Text style={styles.slotText}>{slot ? stripPipeDisplay(slot.text) : ''}</Text>
-                      </Pressable>
-                    ))}
+                  <View style={styles.phAnswerRow}>
+                    {Array.from({ length: phonicsTabTotalBoxes }).map((_, idx) => {
+                      const kind = phonicsTabBlueprint.kinds[idx] ?? 'grapheme';
+                      if (kind === 'space') {
+                        return (
+                          <View key={`ph-answer-space-${idx}`} style={styles.phAnswerSpaceGap} pointerEvents="none" />
+                        );
+                      }
+                      const slot = answerBoxes[idx];
+                      const soundIdx = phonicsSpaceIndex >= 0 && idx > phonicsSpaceIndex ? idx - 1 : idx;
+                      return (
+                        <Pressable
+                          key={`ph-slot-${idx}`}
+                          style={({ pressed }) => [
+                            styles.phAnswerGraphemeSlot,
+                            slot ? styles.phBoxFilled : styles.phBoxEmpty,
+                            pressed && styles.phBoxPressed,
+                          ]}
+                          onPress={() => {
+                            if (slot) {
+                              onPhSlotTap(idx);
+                            } else {
+                              void playPhonemeSoundAtIndex(soundIdx);
+                            }
+                          }}
+                        >
+                          <Text style={styles.slotText}>{slot ? stripPipeDisplay(slot.text) : ''}</Text>
+                        </Pressable>
+                      );
+                    })}
                   </View>
                 </Animated.View>
               </Animated.View>
-              <View style={styles.tileWrap}>
-                {phPool.map((item) => (
-                  <TouchableOpacity
-                    key={item.id}
-                    style={[styles.tile, item.placed && styles.tileGhost]}
-                    onPress={() => onPhPoolTap(item)}
-                    disabled={item.placed}
-                  >
-                    <Text style={[styles.tileText, item.placed && styles.tileTextGhost]}>
-                      {stripPipeDisplay(item.text)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+              <View style={styles.phPoolColumn}>
+                <View style={styles.phPoolWordRow}>
+                  {poolGroup0.map((item, i) => (
+                    <TouchableOpacity
+                      key={`ph-g0-${i}-${item}`}
+                      style={styles.phPoolTile}
+                      onPress={() => onPhPoolTap(item)}
+                      activeOpacity={0.75}
+                    >
+                      <Text style={styles.phPoolTileText}>{stripPipeDisplay(item)}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {poolGroup1.length > 0 ? (
+                  <>
+                    <View style={styles.phPoolWordDivider}>
+                      <View style={styles.phPoolWordDividerLineRow}>
+                        <View style={styles.phPoolWordDividerLine} />
+                      </View>
+                      <Text style={styles.phPoolWordDividerText}>—— space ——</Text>
+                    </View>
+                    <View style={styles.phPoolWordRow}>
+                      {poolGroup1.map((item, i) => (
+                        <TouchableOpacity
+                          key={`ph-g1-${i}-${item}`}
+                          style={styles.phPoolTile}
+                          onPress={() => onPhPoolTap(item)}
+                          activeOpacity={0.75}
+                        >
+                          <Text style={styles.phPoolTileText}>{stripPipeDisplay(item)}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </>
+                ) : null}
               </View>
             </View>
           )
@@ -1383,21 +1824,82 @@ const styles = StyleSheet.create({
   tileTextGhost: {
     color: GRAY,
   },
-  phSlotRow: {
+  phAnswerRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    justifyContent: 'flex-start',
     gap: 8,
+    width: '100%',
   },
-  phBox: {
-    minWidth: 40,
-    minHeight: 48,
+  phAnswerGraphemeSlot: {
+    width: 52,
+    height: 52,
     borderWidth: 2,
     borderColor: BLUE,
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+  },
+  phAnswerSpaceGap: {
+    width: 18,
+    height: 52,
+  },
+  phPoolColumn: {
+    width: '100%',
+    flexDirection: 'column',
+  },
+  phPoolWordRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'flex-start',
+    alignItems: 'flex-start',
+    width: '100%',
+  },
+  phPoolTile: {
+    minWidth: 76,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: BLUE,
+    backgroundColor: '#EBF4FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  phPoolTileGhost: {
+    opacity: 0.38,
+    borderColor: GRAY_LIGHT,
+  },
+  phPoolTileText: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: BLUE,
+    textAlign: 'center',
+  },
+  phPoolTileTextGhost: {
+    color: GRAY,
+  },
+  phPoolWordDivider: {
+    width: '100%',
+    alignItems: 'center',
+    marginVertical: 10,
+  },
+  phPoolWordDividerLineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    marginBottom: 6,
+  },
+  phPoolWordDividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#ccc',
+  },
+  phPoolWordDividerText: {
+    fontSize: 12,
+    color: '#aaa',
+    fontWeight: '600',
   },
   phBoxEmpty: {
     backgroundColor: '#fff',

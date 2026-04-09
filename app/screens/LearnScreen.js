@@ -75,11 +75,7 @@ function normalizeGraphemesPronunciation(parsed, practiceGraphemes) {
 }
 
 function derivePracticeWordFallback(display) {
-  const t = String(display ?? '').trim();
-  if (!t.includes(' ')) return t;
-  const parts = t.split(/\s+/).filter(Boolean);
-  if (!parts.length) return t;
-  return [...parts].sort((a, b) => b.length - a.length)[0];
+  return String(display ?? '').trim();
 }
 
 /** Syllable vs grapheme strings must differ; missing/duplicate graphemes fall back to per-letter split. */
@@ -114,6 +110,7 @@ async function fetchClaudeCard(word) {
       practiceWord: '',
       practicePhonics: '',
       practiceGraphemes: '',
+      syllables: '',
       graphemesPronunciation: {},
       definitions: [],
     };
@@ -122,6 +119,18 @@ async function fetchClaudeCard(word) {
   console.log('[LearnScreen] Claude request for word:', word, 'model:', CLAUDE_MODEL);
 
   const prompt = `You are a British English phonics expert trained in the official Jolly Phonics programme (by Jolly Learning Ltd), helping Singapore primary school students (P1–P6) learn spelling.
+
+IMPORTANT: The input may be a single word OR a multi-word phrase (e.g. "reprimanded severely").
+
+- practicePhonics: if the input is a phrase, split EVERY word and join with a SPACE between words. Use • between graphemes within each word. Example for "reprimanded severely": "r•e•p•r•i•m•a•n•d•ed s•e•v•ere•l•y". Never omit any word from the phrase.
+- practiceGraphemes: same rule as practicePhonics. Split every word, join words with a space. Example: "r•e•p•r•i•m•a•n•d•ed s•e•v•ere•l•y"
+- syllables: split every word into syllables, join words with a space. Example for "reprimanded severely": "rep•ri•man•ded se•vere•ly"
+- practiceWord: must be the full phrase exactly as given. Example: "reprimanded severely"
+
+CRITICAL: Never truncate or omit any word from the phrase in any field.
+
+- definition: define the full phrase as a unit (not just one word).
+- example: use the full phrase in the example sentence.
 
 CRITICAL RULE — SPLITTING APPROACH:
 Always attempt to split words into graphemes using the rules below. Only keep a word unsplit if it is a well-known completely irregular word with no phonetic pattern (e.g. "said", "was", "one", "the"). For all other words, apply the rules below and split as best you can. An imperfect split is better than no split, because children need to see the parts to learn. When uncertain between two valid splits, choose the more common phonics pattern.
@@ -256,13 +265,14 @@ For this exact spelling entry: ${JSON.stringify(word)}
 
 Return ONLY valid JSON, no markdown, no extra text:
 {
-  "phonics": "syllable breakdown of full entry using • separator",
+  "phonics": "for a phrase: syllable-style breakdown of the FULL entry — split each word into syllables, join words with a space, use • between syllables. For a single word: syllable breakdown using •",
   "definition": "one short child-friendly definition max 2 sentences, suitable for Singapore P1-P6",
   "example": "one natural example sentence",
   "emoji": "one Unicode emoji representing the meaning",
-  "practiceWord": "if multi-word phrase pick the hardest single word; if single word return unchanged",
-  "practicePhonics": "syllable breakdown of practiceWord by RHYTHM using syllable rules above. Single syllable words = return word unchanged with no •",
-  "practiceGraphemes": "sound-unit breakdown of practiceWord. Use ALL digraph/vowel team/chunk rules above. NEVER split a digraph, vowel team, or special chunk. If uncertain about any portion, keep that portion as one unsplit unit rather than guessing.",
+  "practiceWord": "exactly the full input string (word or phrase); for phrases never drop or shorten words",
+  "syllables": "syllable breakdown only: each word split into syllables joined by •; multiple words separated by a single space. Example phrase reprimanded severely as rep•ri•man•ded se•vere•ly; single word enormous as e•nor•mous",
+  "practicePhonics": "split EVERY word into graphemes with • within each word; for phrases join words with a SPACE between words. Never omit a word. Single-word entries: grapheme split with •",
+  "practiceGraphemes": "same as practicePhonics: every word split with • between graphemes; phrases join words with a space. Use digraph/vowel team rules — never split a digraph or vowel team across •",
   "graphemesPronunciation": {
     "each_grapheme_key": "British English TTS pronunciation text using sounds from rules above. Silent letters use empty string ''."
   },
@@ -346,6 +356,14 @@ REMEMBER: If unsure how to split any part of a word, keep it whole. Never guess.
   let practiceGraphemes = String(parsed.practiceGraphemes ?? '').trim();
   practiceGraphemes = ensureDistinctGraphemes(practiceWord, practicePhonics, practiceGraphemes);
 
+  let syllables = String(parsed.syllables ?? '').trim();
+  if (!syllables || syllables === '—') {
+    const phonicsField = String(parsed.phonics ?? '').trim();
+    if (phonicsField && phonicsField !== '—') {
+      syllables = phonicsField;
+    }
+  }
+
   const definitions = normalizeDefinitions(parsed);
   const graphemesPronunciation = normalizeGraphemesPronunciation(parsed, practiceGraphemes);
 
@@ -356,6 +374,7 @@ REMEMBER: If unsure how to split any part of a word, keep it whole. Never guess.
     practiceWord,
     practicePhonics,
     practiceGraphemes,
+    syllables,
     graphemesPronunciation,
     definitions,
   };
@@ -393,6 +412,7 @@ export default function LearnScreen() {
     practiceWord: '',
     practicePhonics: '',
     practiceGraphemes: '',
+    syllables: '',
     graphemesPronunciation: {},
     definitions: [],
   });
@@ -525,6 +545,7 @@ export default function LearnScreen() {
         practiceWord: '',
         practicePhonics: '',
         practiceGraphemes: '',
+        syllables: '',
         graphemesPronunciation: {},
         definitions: [],
       });
@@ -554,6 +575,7 @@ export default function LearnScreen() {
         practiceWord: pw,
         practicePhonics: pp,
         practiceGraphemes: pgr,
+        syllables: String(cached.syllables ?? '').trim(),
         definitions: defs,
         graphemesPronunciation: gp,
       });
@@ -589,6 +611,7 @@ export default function LearnScreen() {
         practiceWord: pw,
         practicePhonics: pp,
         practiceGraphemes: pgr,
+        syllables: String(dbCard.syllables ?? '').trim(),
         definitions: defs,
         graphemesPronunciation: gp,
       };
@@ -652,6 +675,7 @@ export default function LearnScreen() {
             practiceWord: '',
             practicePhonics: '',
             practiceGraphemes: '',
+            syllables: '',
             graphemesPronunciation: {},
             definitions: [],
           });
@@ -717,6 +741,7 @@ export default function LearnScreen() {
         word: currentWord,
         practiceWord: card.practiceWord,
         practicePhonics: card.practicePhonics,
+        syllables: card.syllables ?? '',
         practiceGraphemes: ensureDistinctGraphemes(
           card.practiceWord,
           card.practicePhonics,

@@ -5,6 +5,7 @@ import {
   ActivityIndicator,
   ScrollView,
   StyleSheet,
+  SafeAreaView,
   Text,
   TouchableOpacity,
   View,
@@ -690,6 +691,34 @@ export default function LearnScreen() {
     };
   }, [currentWord, userId, index, words]);
 
+  const playOpenAiTts = async (text, ttsOptions = {}) => {
+    await unloadSound();
+    await Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+    });
+
+    lastTtsAt.current = Date.now();
+    const base64 = await fetchOpenAITtsAudio(text, ttsOptions);
+    const dir = FileSystem.cacheDirectory;
+    if (!dir) {
+      throw new Error('Cache directory not available for audio.');
+    }
+    const fileUri = `${dir}tts-${Date.now()}.mp3`;
+    await FileSystem.writeAsStringAsync(fileUri, base64, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+
+    const { sound } = await Audio.Sound.createAsync({ uri: fileUri });
+    soundRef.current = sound;
+    sound.setOnPlaybackStatusUpdate((status) => {
+      if (status.isLoaded && status.didJustFinish) {
+        setPlaying(false);
+      }
+    });
+    await sound.playAsync();
+  };
+
   const onPlayPronunciation = async () => {
     if (!currentWord || playing) return;
 
@@ -702,31 +731,7 @@ export default function LearnScreen() {
     setPlaying(true);
     setErrorMsg(null);
     try {
-      await unloadSound();
-      await Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: false,
-      });
-
-      lastTtsAt.current = Date.now();
-      const base64 = await fetchOpenAITtsAudio(currentWord);
-      const dir = FileSystem.cacheDirectory;
-      if (!dir) {
-        throw new Error('Cache directory not available for audio.');
-      }
-      const fileUri = `${dir}tts-${Date.now()}.mp3`;
-      await FileSystem.writeAsStringAsync(fileUri, base64, {
-        encoding: FileSystem.EncodingType.Base64,
-      });
-
-      const { sound } = await Audio.Sound.createAsync({ uri: fileUri });
-      soundRef.current = sound;
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
-          setPlaying(false);
-        }
-      });
-      await sound.playAsync();
+      await playOpenAiTts(currentWord, {});
     } catch (e) {
       setErrorMsg(e?.message ?? 'Could not play audio.');
       setPlaying(false);
@@ -766,58 +771,38 @@ export default function LearnScreen() {
 
   if (loadingList) {
     return (
-      <View style={[styles.container, styles.centered]}>
+      <SafeAreaView style={[styles.container, styles.centered]}>
         <ActivityIndicator size="large" color="#4A90E2" />
         <Text style={styles.muted}>Loading your words…</Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (!userId) {
     return (
-      <View style={[styles.container, styles.centered]}>
+      <SafeAreaView style={[styles.container, styles.centered]}>
         <Text style={styles.errorText}>{errorMsg ?? 'Not logged in.'}</Text>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
-      </View>
+      </SafeAreaView>
     );
   }
 
   if (!words.length) {
     return (
-      <View style={[styles.container, styles.centered]}>
+      <SafeAreaView style={[styles.container, styles.centered]}>
         <Text style={styles.muted}>No words saved yet.</Text>
         <Text style={styles.hint}>Import a list from the Home screen first.</Text>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <View style={styles.navRow}>
-        <TouchableOpacity
-          style={[styles.navBtn, index === 0 && styles.navBtnDisabled]}
-          onPress={goPrev}
-          disabled={index === 0}
-        >
-          <Text style={styles.navBtnText}>← Previous</Text>
-        </TouchableOpacity>
-        <Text style={styles.counter}>
-          {index + 1} / {words.length}
-        </Text>
-        <TouchableOpacity
-          style={[styles.navBtn, index >= words.length - 1 && styles.navBtnDisabled]}
-          onPress={goNext}
-          disabled={index >= words.length - 1}
-        >
-          <Text style={styles.navBtnText}>Next →</Text>
-        </TouchableOpacity>
-      </View>
-
+    <SafeAreaView style={styles.container}>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -868,10 +853,30 @@ export default function LearnScreen() {
         </TouchableOpacity>
       </ScrollView>
 
+      <Text style={styles.bottomCounter}>
+        {index + 1} / {words.length}
+      </Text>
+      <View style={styles.bottomNavRow}>
+        <TouchableOpacity
+          style={[styles.secondaryNavBtn, index === 0 && styles.secondaryNavBtnDisabled]}
+          onPress={goPrev}
+          disabled={index === 0}
+        >
+          <Text style={styles.secondaryNavBtnText}>← Previous</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.secondaryNavBtn, index >= words.length - 1 && styles.secondaryNavBtnDisabled]}
+          onPress={goNext}
+          disabled={index >= words.length - 1}
+        >
+          <Text style={styles.secondaryNavBtnText}>Next →</Text>
+        </TouchableOpacity>
+      </View>
+
       <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
         <Text style={styles.backText}>← Back</Text>
       </TouchableOpacity>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -892,29 +897,6 @@ const styles = StyleSheet.create({
   centered: {
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  navRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
-  navBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-  },
-  navBtnDisabled: {
-    opacity: 0.35,
-  },
-  navBtnText: {
-    color: '#4A90E2',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  counter: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '600',
   },
   wordTitle: {
     fontSize: 32,
@@ -1013,6 +995,36 @@ const styles = StyleSheet.create({
   backButton: {
     alignSelf: 'center',
     paddingVertical: 12,
+  },
+  bottomCounter: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 10,
+    marginBottom: 8,
+  },
+  bottomNavRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 6,
+  },
+  secondaryNavBtn: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderWidth: 1.5,
+    borderColor: '#4A90E2',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  secondaryNavBtnDisabled: {
+    opacity: 0.45,
+  },
+  secondaryNavBtnText: {
+    color: '#4A90E2',
+    fontSize: 16,
+    fontWeight: '700',
   },
   backText: {
     color: '#4A90E2',

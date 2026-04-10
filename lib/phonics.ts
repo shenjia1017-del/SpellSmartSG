@@ -141,7 +141,7 @@ export function splitIntoGraphemes(word: string): string[] {
 export const PHONEME_TTS_SPEED = 0.85;
 
 /** British-style TTS: full word vs phoneme (OpenAI voices). */
-export const TTS_VOICE_WORD = 'onyx';
+export const TTS_VOICE_WORD = 'nova';
 export const TTS_VOICE_PHONEME = 'nova';
 
 /** Sent when the Speech API accepts a locale hint (omit if request fails). */

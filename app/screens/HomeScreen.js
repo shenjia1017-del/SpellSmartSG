@@ -15,7 +15,6 @@ import { supabase } from '../../lib/supabase';
 export default function HomeScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [dictationLoading, setDictationLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [weekGroups, setWeekGroups] = useState([]);
   const [selectedWeek, setSelectedWeek] = useState('');
@@ -61,7 +60,7 @@ export default function HomeScreen() {
             if (row?.word == null || row.word === '') continue;
             const weekLabel = String(row?.week_label ?? '');
             if (!grouped.has(weekLabel)) {
-              grouped.set(weekLabel, { words: [], latestCreatedAt: 0 });
+              grouped.set(weekLabel, { words: [], passages: [], latestCreatedAt: 0 });
             }
             const createdAtMs = row?.created_at ? Date.parse(row.created_at) : 0;
             const bucket = grouped.get(weekLabel);
@@ -69,10 +68,44 @@ export default function HomeScreen() {
             bucket.latestCreatedAt = Math.max(bucket.latestCreatedAt, Number.isFinite(createdAtMs) ? createdAtMs : 0);
           }
 
+          let { data: passageData, error: passageError } = await supabase
+            .from('passages')
+            .select('id, body, week_label, created_at')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: true });
+          if (passageError) {
+            const retryP = await supabase
+              .from('passages')
+              .select('id, body, week_label, created_at')
+              .eq('user_id', userId)
+              .order('id', { ascending: true });
+            passageData = retryP.data;
+            passageError = retryP.error;
+          }
+          if (passageError) throw passageError;
+
+          const passageRows = Array.isArray(passageData) ? passageData : [];
+          for (const row of passageRows) {
+            const body = String(row?.body ?? '').trim();
+            if (!body) continue;
+            const weekLabel = String(row?.week_label ?? '');
+            if (!grouped.has(weekLabel)) {
+              grouped.set(weekLabel, { words: [], passages: [], latestCreatedAt: 0 });
+            }
+            const bucket = grouped.get(weekLabel);
+            bucket.passages.push(row);
+            const createdAtMs = row?.created_at ? Date.parse(row.created_at) : 0;
+            bucket.latestCreatedAt = Math.max(
+              bucket.latestCreatedAt,
+              Number.isFinite(createdAtMs) ? createdAtMs : 0,
+            );
+          }
+
           const groups = Array.from(grouped.entries())
             .map(([weekLabel, bucket]) => ({
               weekLabel,
               words: bucket.words,
+              passages: bucket.passages,
               latestCreatedAt: bucket.latestCreatedAt,
             }))
             .sort((a, b) => b.latestCreatedAt - a.latestCreatedAt);
@@ -198,64 +231,18 @@ export default function HomeScreen() {
         style={[
           styles.button,
           styles.dictationOutlineButton,
-          (!selectedWeek || !selectedGroup || selectedGroup.words.length === 0 || dictationLoading) &&
-            styles.buttonDisabled,
+          (!selectedWeek || !selectedGroup || selectedGroup.words.length === 0) && styles.buttonDisabled,
         ]}
-        onPress={async () => {
-          if (dictationLoading) return;
-          const selectedWords = selectedGroup?.words ?? [];
+        onPress={() => {
           const weekLabel = selectedGroup?.weekLabel ?? '';
-          const words = selectedWords
-            .map((row) => ({
-              word: String(typeof row === 'string' ? row : row?.word ?? '').trim(),
-              week_label: String(
-                (typeof row === 'object' && row != null && row.week_label != null
-                  ? row.week_label
-                  : weekLabel) ?? '',
-              ),
-            }))
-            .filter((w) => w.word.length > 0);
-          setDictationLoading(true);
-          setErrorMsg('');
-          try {
-            const { data: sessionData } = await supabase.auth.getSession();
-            const userId = sessionData?.session?.user?.id;
-            if (!userId) {
-              setErrorMsg('Please log in to open dictation.');
-              return;
-            }
-            const { data: passageRows, error } = await supabase
-              .from('passages')
-              .select('body, week_label')
-              .eq('user_id', userId)
-              .eq('week_label', weekLabel);
-            if (error) throw error;
-            const passages = (Array.isArray(passageRows) ? passageRows : [])
-              .map((row) => ({
-                body: String(row?.body ?? '').trim(),
-                week_label: String(row?.week_label ?? weekLabel),
-              }))
-              .filter((p) => p.body.length > 0);
-            router.push({
-              pathname: '/dictation',
-              params: {
-                wordsJSON: JSON.stringify(words),
-                passagesJSON: JSON.stringify(passages),
-              },
-            });
-          } catch (e) {
-            setErrorMsg(e?.message ?? 'Failed to load passages.');
-          } finally {
-            setDictationLoading(false);
-          }
+          router.push({
+            pathname: '/dictation',
+            params: { weekLabel },
+          });
         }}
-        disabled={
-          !selectedWeek || !selectedGroup || selectedGroup.words.length === 0 || dictationLoading
-        }
+        disabled={!selectedWeek || !selectedGroup || selectedGroup.words.length === 0}
       >
-        <Text style={styles.dictationOutlineButtonText}>
-          {dictationLoading ? 'Loading…' : 'Dictation Test 📝'}
-        </Text>
+        <Text style={styles.dictationOutlineButtonText}>Dictation Test 📝</Text>
       </TouchableOpacity>
       {!selectedWeek ? <Text style={styles.selectWeekHint}>Please select a week first</Text> : null}
 
@@ -280,6 +267,7 @@ export default function HomeScreen() {
                   >
                     <Text style={[styles.weekRowText, active && styles.weekRowTextActive]}>
                       {group.weekLabel} — {group.words.length} words
+                      {group.passages?.length ? ` · ${group.passages.length} passage${group.passages.length === 1 ? '' : 's'}` : ''}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -299,20 +287,47 @@ export default function HomeScreen() {
 
       <View style={styles.selectedCard}>
         <Text style={styles.selectedTitle}>
-          {selectedGroup ? `${selectedGroup.weekLabel} Words` : 'Select a Week'}
+          {selectedGroup
+            ? selectedGroup.weekLabel === ''
+              ? '(no label)'
+              : selectedGroup.weekLabel
+            : 'Select a Week'}
         </Text>
         <ScrollView style={styles.selectedList} contentContainerStyle={styles.selectedListContent}>
-          {selectedGroup?.words?.map((row, idx) => {
-            const word = typeof row === 'string' ? row : row?.word ?? '';
-            return (
-              <Text key={`${String(word)}-${idx}`} style={styles.wordItem}>
-                {idx + 1}. {word}
-              </Text>
-            );
-          })}
-          {selectedGroup && selectedGroup.words.length === 0 ? (
-            <Text style={styles.emptyText}>No words in this week.</Text>
-          ) : null}
+          {selectedGroup ? (
+            <>
+              <Text style={styles.sectionHeading}>Words & Phrases</Text>
+              {selectedGroup.words?.map((row, idx) => {
+                const word = typeof row === 'string' ? row : row?.word ?? '';
+                return (
+                  <Text key={`${String(word)}-${idx}`} style={styles.wordItem}>
+                    {idx + 1}. {word}
+                  </Text>
+                );
+              })}
+              {selectedGroup.words.length === 0 && selectedGroup.passages?.length > 0 ? (
+                <Text style={styles.emptyInline}>No words in this week.</Text>
+              ) : null}
+
+              {selectedGroup.passages?.length > 0 ? (
+                <>
+                  <Text style={[styles.sectionHeading, styles.sectionHeadingAfterWords]}>Sentences</Text>
+                  {selectedGroup.passages.map((p, idx) => (
+                    <Text key={p.id != null ? String(p.id) : `passage-${idx}`} style={styles.wordItem}>
+                      {idx + 1}. {String(p?.body ?? '').trim()}
+                    </Text>
+                  ))}
+                </>
+              ) : null}
+
+              {selectedGroup.words.length === 0 &&
+              (!selectedGroup.passages || selectedGroup.passages.length === 0) ? (
+                <Text style={styles.emptyText}>No words or passages in this week.</Text>
+              ) : null}
+            </>
+          ) : (
+            <Text style={styles.emptyText}>Select a week above to see words and passages.</Text>
+          )}
         </ScrollView>
       </View>
     </View>
@@ -452,6 +467,23 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#333',
     marginBottom: 8,
+  },
+  sectionHeading: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#555',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+    marginBottom: 10,
+    marginTop: 2,
+  },
+  sectionHeadingAfterWords: {
+    marginTop: 18,
+  },
+  emptyInline: {
+    color: '#888',
+    fontSize: 14,
+    marginBottom: 4,
   },
   selectedList: {
     flex: 1,

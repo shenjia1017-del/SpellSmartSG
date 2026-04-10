@@ -4,7 +4,6 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -20,6 +19,7 @@ import {
   TTS_LANGUAGE,
   TTS_VOICE_WORD,
 } from '../../lib/phonics';
+import { supabase } from '../../lib/supabase';
 
 const BLUE = '#378ADD';
 const GREEN_PHRASE = '#2e7d32';
@@ -28,6 +28,9 @@ const TTS_MIN_MS = 800;
 const TTS_SPEED_WORDS = 0.75;
 /** Full sentences — slower for young students. */
 const TTS_SPEED_SENTENCES = 0.65;
+
+/** Minimum silence between end of one sentence TTS and start of the next (sentence modes). */
+const SENTENCE_GAP_MS = 3000;
 
 function shuffle(arr) {
   const a = [...arr];
@@ -40,7 +43,8 @@ function shuffle(arr) {
   return a;
 }
 
-function buildMixedWordPhraseItems(words, passages) {
+/** Words & Phrases mode: `words` table rows only — never passage bodies. */
+function buildMixedWordPhraseItems(words) {
   const out = [];
   for (const w of words || []) {
     const text = String(w?.word ?? '').trim();
@@ -52,34 +56,68 @@ function buildMixedWordPhraseItems(words, passages) {
       tag: text.includes(' ') ? 'phrase' : 'word',
     });
   }
-  for (const p of passages || []) {
-    const text = String(p?.body ?? '').trim();
-    if (!text) continue;
-    out.push({
-      id: `p-${out.length}-${text.slice(0, 24)}`,
-      text,
-      week_label: String(p?.week_label ?? ''),
-      tag: 'phrase',
-    });
-  }
   return shuffle(out);
 }
 
 /**
- * Split stored passage block into sentences (keeps final "." for natural TTS pauses).
- * Splits on ". " or ".\n" after normalizing newlines.
+ * Split passage into sentences in original order: break after . ? ! when followed by
+ * whitespace or end. Punctuation stays on the sentence before it. Drops empty segments.
  */
 function splitPassageIntoSentences(body) {
-  const raw = String(body ?? '').trim();
+  const raw = String(body ?? '').replace(/\r\n/g, '\n').trim();
   if (!raw) return [];
-  const normalized = raw.replace(/\r\n/g, '\n').replace(/\.\n/g, '. ');
-  const parts = normalized
-    .split('. ')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return parts.map((seg) => (/[.!?]$/.test(seg) ? seg : `${seg}.`));
+  const out = [];
+  const re = /[\s\S]*?[.!?](?=\s|$)/g;
+  let m;
+  let lastIndex = 0;
+  while ((m = re.exec(raw)) !== null) {
+    const chunk = m[0].trim();
+    if (chunk) out.push(chunk);
+    lastIndex = re.lastIndex;
+  }
+  const tail = raw.slice(lastIndex).trim();
+  if (tail) out.push(tail);
+  return out.filter(Boolean);
 }
 
+/**
+ * Punctuation → spoken words for sentence TTS only. Step order matches product spec.
+ * UI and scoring still use the raw sentence in the queue.
+ */
+function sentenceTextToTtsInput(raw) {
+  let t = String(raw ?? '');
+
+  // Step 1 — quotation marks first
+  t = t.replace(/\u201C/g, ' open inverted comma ');
+  t = t.replace(/\u201D/g, ' close inverted comma ');
+  t = t.replace(/\u2018/g, ' open single quote ');
+  t = t.replace(/\u2019/g, ' close single quote ');
+  let useOpenDouble = true;
+  t = t.replace(/"/g, () => {
+    const sp = useOpenDouble ? ' open inverted comma ' : ' close inverted comma ';
+    useOpenDouble = !useOpenDouble;
+    return sp;
+  });
+
+  // Step 2 — ellipsis before single full stops
+  t = t.replace(/\u2026/g, ' dot dot dot ');
+  t = t.replace(/\.{3}/g, ' dot dot dot ');
+  t = t.replace(/,/g, ' comma ');
+  t = t.replace(/\./g, ' full stop ');
+  t = t.replace(/\?/g, ' question mark ');
+  t = t.replace(/!/g, ' exclamation mark ');
+  t = t.replace(/;/g, ' semicolon ');
+  t = t.replace(/:/g, ' colon ');
+  t = t.replace(/'/g, ' apostrophe ');
+  t = t.replace(/-/g, ' dash ');
+  t = t.replace(/\(/g, ' open bracket ');
+  t = t.replace(/\)/g, ' close bracket ');
+
+  // Step 3
+  return t.replace(/\s+/g, ' ').trim();
+}
+
+/** Sentences mode: `passages` table rows only — ordered sentences; never words table. */
 function buildSentenceItems(passages) {
   const out = [];
   for (const p of passages || []) {
@@ -94,7 +132,7 @@ function buildSentenceItems(passages) {
       });
     }
   }
-  return shuffle(out);
+  return out;
 }
 
 function normalizeAnswer(s) {
@@ -151,16 +189,83 @@ export default function DictationScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const params = useLocalSearchParams();
-  const words = useMemo(() => {
+
+  /** When set (including empty string), load words + passages from Supabase for that week only. */
+  const useWeekFetch = params.weekLabel !== undefined && params.weekLabel !== null;
+  const weekLabelForQuery = useMemo(() => {
+    if (!useWeekFetch) return '';
+    const raw = params.weekLabel;
+    return Array.isArray(raw) ? String(raw[0] ?? '') : String(raw ?? '');
+  }, [useWeekFetch, params.weekLabel]);
+
+  const wordsFromParams = useMemo(() => {
     const raw = params.wordsJSON;
     const s = raw == null ? '' : Array.isArray(raw) ? String(raw[0] ?? '') : String(raw);
     return parseJsonArrayParam(s);
   }, [params.wordsJSON]);
-  const passages = useMemo(() => {
+  const passagesFromParams = useMemo(() => {
     const raw = params.passagesJSON;
     const s = raw == null ? '' : Array.isArray(raw) ? String(raw[0] ?? '') : String(raw);
     return parseJsonArrayParam(s);
   }, [params.passagesJSON]);
+
+  const [fetchedWords, setFetchedWords] = useState([]);
+  const [fetchedPassages, setFetchedPassages] = useState([]);
+  const [weekDataLoading, setWeekDataLoading] = useState(useWeekFetch);
+  const [weekDataError, setWeekDataError] = useState(null);
+
+  useEffect(() => {
+    if (!useWeekFetch) {
+      setWeekDataLoading(false);
+      setWeekDataError(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setWeekDataLoading(true);
+      setWeekDataError(null);
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const userId = sessionData?.session?.user?.id;
+        if (!userId) {
+          throw new Error('Please log in to use dictation.');
+        }
+        const [wRes, pRes] = await Promise.all([
+          supabase
+            .from('words')
+            .select('id, word, week_label')
+            .eq('user_id', userId)
+            .eq('week_label', weekLabelForQuery),
+          supabase
+            .from('passages')
+            .select('id, body, week_label')
+            .eq('user_id', userId)
+            .eq('week_label', weekLabelForQuery)
+            .order('id', { ascending: true }),
+        ]);
+        if (wRes.error) throw wRes.error;
+        if (pRes.error) throw pRes.error;
+        if (!cancelled) {
+          setFetchedWords(Array.isArray(wRes.data) ? wRes.data : []);
+          setFetchedPassages(Array.isArray(pRes.data) ? pRes.data : []);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setFetchedWords([]);
+          setFetchedPassages([]);
+          setWeekDataError(e?.message ?? 'Failed to load dictation data.');
+        }
+      } finally {
+        if (!cancelled) setWeekDataLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [useWeekFetch, weekLabelForQuery]);
+
+  const words = useWeekFetch ? fetchedWords : wordsFromParams;
+  const passages = useWeekFetch ? fetchedPassages : passagesFromParams;
 
   const soundRef = useRef(null);
   const lastTtsAt = useRef(0);
@@ -175,11 +280,18 @@ export default function DictationScreen() {
   const [idx, setIdx] = useState(0);
   const [inputText, setInputText] = useState('');
   const [ttsBusy, setTtsBusy] = useState(false);
+  /** After first successful playback for current item, main play button shows "Play again". */
+  const [hasPlayed, setHasPlayed] = useState(false);
   const [resultsRows, setResultsRows] = useState([]);
   /** Sentence flows: Next allowed only after playback + 3s countdown. */
   const [sentenceNextReady, setSentenceNextReady] = useState(false);
   /** 3 | 2 | 1 while counting down, null when idle / done. */
   const [sentenceCountdown, setSentenceCountdown] = useState(null);
+
+  const flowKindRef = useRef(flowKind);
+  flowKindRef.current = flowKind;
+  /** Timestamp of last finished sentence TTS (sentence dictation modes only). */
+  const lastSentenceEndAtRef = useRef(0);
 
   const current = queue[idx] ?? null;
   const total = queue.length;
@@ -215,6 +327,21 @@ export default function DictationScreen() {
       sentenceCountdownTimerRef.current = null;
     }
   }, [idx, phase]);
+
+  useEffect(() => {
+    if (
+      phase !== 'wordsActive' &&
+      phase !== 'sentencesTypeActive' &&
+      phase !== 'sentencesPaperActive'
+    ) {
+      return;
+    }
+    setHasPlayed(false);
+  }, [idx, phase]);
+
+  useEffect(() => {
+    if (idx === 0) lastSentenceEndAtRef.current = 0;
+  }, [idx]);
 
   useLayoutEffect(() => {
     let title = 'Dictation';
@@ -294,6 +421,11 @@ export default function DictationScreen() {
       sound.setOnPlaybackStatusUpdate((s) => {
         if (s.isLoaded && s.didJustFinish) {
           setTtsBusy(false);
+          setHasPlayed(true);
+          const fk = flowKindRef.current;
+          if (fk === 'sentencesType' || fk === 'sentencesPaper') {
+            lastSentenceEndAtRef.current = Date.now();
+          }
           const cb = playbackEndCallbackRef.current;
           playbackEndCallbackRef.current = null;
           cb?.();
@@ -307,7 +439,7 @@ export default function DictationScreen() {
   };
 
   const startWordsFlow = () => {
-    const items = buildMixedWordPhraseItems(words, passages);
+    const items = buildMixedWordPhraseItems(words);
     if (items.length === 0) {
       return;
     }
@@ -388,18 +520,38 @@ export default function DictationScreen() {
   const scoreTotal = resultsRows.length;
   const scorePct = scoreTotal > 0 ? score / scoreTotal : 0;
 
-  const hasWordPhraseContent =
-    buildMixedWordPhraseItems(words, passages).length > 0;
+  const hasWordPhraseContent = buildMixedWordPhraseItems(words).length > 0;
   const hasSentenceContent = buildSentenceItems(passages).length > 0;
 
   const playWordOrPhrase = () =>
     void playTts(current?.text, { speed: TTS_SPEED_WORDS });
 
-  const playSentenceAudio = () =>
-    void playTts(current?.text, {
-      speed: TTS_SPEED_SENTENCES,
-      onPlaybackEnd: startPostPlaybackCountdown,
-    });
+  const playSentenceAudio = () => {
+    void (async () => {
+      const fk = flowKindRef.current;
+      const isSentenceFlow = fk === 'sentencesType' || fk === 'sentencesPaper';
+      const raw = String(current?.text ?? '').trim();
+      if (!raw) return;
+
+      if (
+        isSentenceFlow &&
+        idx > 0 &&
+        !hasPlayed &&
+        lastSentenceEndAtRef.current > 0
+      ) {
+        const elapsed = Date.now() - lastSentenceEndAtRef.current;
+        if (elapsed < SENTENCE_GAP_MS) {
+          await new Promise((r) => setTimeout(r, SENTENCE_GAP_MS - elapsed));
+        }
+      }
+
+      const ttsInput = isSentenceFlow ? sentenceTextToTtsInput(raw) : raw;
+      await playTts(ttsInput, {
+        speed: TTS_SPEED_SENTENCES,
+        onPlaybackEnd: startPostPlaybackCountdown,
+      });
+    })();
+  };
 
   return (
     <KeyboardAvoidingView
@@ -415,27 +567,39 @@ export default function DictationScreen() {
         {phase === 'modeSelect' ? (
           <View style={styles.block}>
             <Text style={styles.lead}>Choose how you want to practise dictation.</Text>
-            <TouchableOpacity
-              style={[styles.primaryBtn, !hasWordPhraseContent && styles.btnDisabled]}
-              onPress={startWordsFlow}
-              disabled={!hasWordPhraseContent}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.primaryBtnText}>Words & Phrases</Text>
-              <Text style={styles.subtitle}>Mixed together, random order</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.primaryBtn, !hasSentenceContent && styles.btnDisabled]}
-              onPress={() => setPhase('sentenceModeSelect')}
-              disabled={!hasSentenceContent}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.primaryBtnText}>Sentences</Text>
-              <Text style={styles.subtitle}>Choose how to answer</Text>
-            </TouchableOpacity>
-            {!hasWordPhraseContent && !hasSentenceContent ? (
-              <Text style={styles.warn}>No words or passages to dictate. Add content from Import first.</Text>
-            ) : null}
+            {weekDataLoading ? (
+              <View style={styles.loadingBlock}>
+                <ActivityIndicator color={BLUE} />
+                <Text style={styles.hintMuted}>{"Loading this week's words and passages…"}</Text>
+              </View>
+            ) : (
+              <>
+                {weekDataError ? <Text style={styles.warn}>{weekDataError}</Text> : null}
+                <TouchableOpacity
+                  style={[styles.primaryBtn, !hasWordPhraseContent && styles.btnDisabled]}
+                  onPress={startWordsFlow}
+                  disabled={!hasWordPhraseContent}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.primaryBtnText}>Words & Phrases</Text>
+                  <Text style={styles.subtitle}>From your spelling list only, random order</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.primaryBtn, !hasSentenceContent && styles.btnDisabled]}
+                  onPress={() => setPhase('sentenceModeSelect')}
+                  disabled={!hasSentenceContent}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.primaryBtnText}>Sentences</Text>
+                  <Text style={styles.subtitle}>From your saved passages only</Text>
+                </TouchableOpacity>
+                {!weekDataError && !hasWordPhraseContent && !hasSentenceContent ? (
+                  <Text style={styles.warn}>
+                    No words or passages for this week. Add a list and/or passage from Import first.
+                  </Text>
+                ) : null}
+              </>
+            )}
             <TouchableOpacity style={styles.textLink} onPress={() => router.back()}>
               <Text style={styles.textLinkLabel}>← Back</Text>
             </TouchableOpacity>
@@ -496,16 +660,11 @@ export default function DictationScreen() {
               {ttsBusy ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.playBigText}>🔊 Play</Text>
+                <Text style={styles.playBigText}>
+                  {hasPlayed ? '🔊 Play again' : '🔊 Play'}
+                </Text>
               )}
             </TouchableOpacity>
-
-            <Pressable
-              onPress={phase === 'wordsActive' ? playWordOrPhrase : playSentenceAudio}
-              disabled={ttsBusy}
-            >
-              <Text style={styles.playAgain}>🔊 Play again</Text>
-            </Pressable>
 
             {phase === 'sentencesTypeActive' && sentenceCountdown != null ? (
               <Text style={styles.countdownHint}>Next in {sentenceCountdown}...</Text>
@@ -571,13 +730,11 @@ export default function DictationScreen() {
               {ttsBusy ? (
                 <ActivityIndicator color="#fff" />
               ) : (
-                <Text style={styles.playBigText}>🔊 Play sentence</Text>
+                <Text style={styles.playBigText}>
+                  {hasPlayed ? '🔊 Play again' : '🔊 Play'}
+                </Text>
               )}
             </TouchableOpacity>
-
-            <Pressable onPress={playSentenceAudio} disabled={ttsBusy}>
-              <Text style={styles.playAgain}>🔊 Play again</Text>
-            </Pressable>
 
             {sentenceCountdown != null ? (
               <Text style={styles.countdownHint}>Next in {sentenceCountdown}...</Text>
@@ -679,6 +836,11 @@ const styles = StyleSheet.create({
   },
   block: {
     gap: 16,
+  },
+  loadingBlock: {
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 24,
   },
   lead: {
     fontSize: 17,
@@ -795,13 +957,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 22,
     fontWeight: '800',
-  },
-  playAgain: {
-    color: BLUE,
-    fontSize: 16,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginTop: -4,
   },
   input: {
     borderWidth: 1,

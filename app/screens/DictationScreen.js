@@ -48,7 +48,8 @@ function shuffle(arr) {
 function buildMixedWordPhraseItems(words) {
   const out = [];
   for (const w of words || []) {
-    const text = String(w?.word ?? '').trim();
+    const text =
+      typeof w === 'string' ? String(w).trim() : String(w?.word ?? '').trim();
     if (!text) continue;
     out.push({
       id: `w-${out.length}-${text.slice(0, 24)}`,
@@ -146,6 +147,29 @@ function answersMatch(typed, expected) {
   return normalizeAnswer(typed).toLowerCase() === normalizeAnswer(expected).toLowerCase();
 }
 
+const SENTENCE_PREVIEW_LEN = 30;
+
+function truncateSentencePreview(text) {
+  const t = String(text ?? '').trim();
+  if (t.length <= SENTENCE_PREVIEW_LEN) return t;
+  return `${t.slice(0, SENTENCE_PREVIEW_LEN)}...`;
+}
+
+/** First differing word pair for sentence dictation results, e.g. "spacial → special". */
+function firstWrongWordComparison(typed, expected) {
+  const ta = normalizeAnswer(typed).split(/\s+/).filter(Boolean);
+  const tb = normalizeAnswer(expected).split(/\s+/).filter(Boolean);
+  const max = Math.max(ta.length, tb.length);
+  for (let i = 0; i < max; i += 1) {
+    const a = ta[i];
+    const b = tb[i];
+    if ((a ?? '').toLowerCase() !== (b ?? '').toLowerCase()) {
+      return `${a ?? '(missing)'} → ${b ?? '(missing)'}`;
+    }
+  }
+  return '—';
+}
+
 function scoreMessage(pct) {
   if (pct >= 1) return 'Perfect! You are a spelling star!';
   if (pct >= 0.8) return 'Well done! Keep it up.';
@@ -209,6 +233,13 @@ export default function DictationScreen() {
     const s = raw == null ? '' : Array.isArray(raw) ? String(raw[0] ?? '') : String(raw);
     return parseJsonArrayParam(s);
   }, [params.passagesJSON]);
+
+  /** Open Words flow immediately (e.g. from Review with wrong words only). */
+  const autoStartWordsParam = useMemo(() => {
+    const raw = params.autoStartWords;
+    const s = raw == null ? '' : Array.isArray(raw) ? String(raw[0] ?? '') : String(raw);
+    return s === '1' || s === 'true';
+  }, [params.autoStartWords]);
 
   const [fetchedWords, setFetchedWords] = useState([]);
   const [fetchedPassages, setFetchedPassages] = useState([]);
@@ -286,6 +317,10 @@ export default function DictationScreen() {
   /** After first successful playback for current item, main play button shows "Play again". */
   const [hasPlayed, setHasPlayed] = useState(false);
   const [resultsRows, setResultsRows] = useState([]);
+  /** Words & Phrases: expected spellings the user got wrong (for Review). */
+  const [wrongWords, setWrongWords] = useState([]);
+  /** Sentences (type in app): full expected text for each wrong sentence (for redo subset). */
+  const [wrongSentences, setWrongSentences] = useState([]);
   /** Sentence flows: Next allowed only after playback + 3s countdown. */
   const [sentenceNextReady, setSentenceNextReady] = useState(false);
   /** 3 | 2 | 1 while counting down, null when idle / done. */
@@ -354,6 +389,16 @@ export default function DictationScreen() {
     setInputText(answers[idx] ?? '');
   }, [phase, idx]);
 
+  useEffect(() => {
+    if (phase !== 'results' || flowKind !== 'words') return;
+    setWrongWords(resultsRows.filter((r) => !r.correct).map((r) => String(r.expected ?? '').trim()));
+  }, [phase, flowKind, resultsRows]);
+
+  useEffect(() => {
+    if (phase !== 'results' || flowKind !== 'sentencesType') return;
+    setWrongSentences(resultsRows.filter((r) => !r.correct).map((r) => String(r.expected ?? '').trim()));
+  }, [phase, flowKind, resultsRows]);
+
   useLayoutEffect(() => {
     let title = 'Dictation';
     if (phase === 'modeSelect') title = 'Dictation';
@@ -362,7 +407,7 @@ export default function DictationScreen() {
     else if (phase === 'sentencesTypeActive') title = 'Sentences';
     else if (phase === 'sentencesPaperActive') title = 'Write on paper';
     else if (phase === 'results') title = 'Results';
-    else if (phase === 'answerReveal') title = 'Answers';
+    else if (phase === 'answerReveal') title = 'Check your answers';
     navigation.setOptions({ title, headerTintColor: BLUE });
   }, [navigation, phase]);
 
@@ -470,7 +515,7 @@ export default function DictationScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- playTts omitted to avoid redundant effect runs
   }, [idx, phase, queue]);
 
-  const startWordsFlow = () => {
+  const startWordsFlow = useCallback(() => {
     const items = buildMixedWordPhraseItems(words);
     if (items.length === 0) {
       return;
@@ -480,10 +525,26 @@ export default function DictationScreen() {
     setFlowKind('words');
     setIdx(0);
     setAnswers([]);
+    setWrongWords([]);
     setInputText('');
     setResultsRows([]);
     setPhase('wordsActive');
-  };
+  }, [words]);
+
+  const autoWordsStartedRef = useRef(false);
+  useEffect(() => {
+    autoWordsStartedRef.current = false;
+  }, [params.wordsJSON, params.autoStartWords, weekLabelForQuery]);
+
+  useEffect(() => {
+    if (!autoStartWordsParam || weekDataLoading) return;
+    if (phase !== 'modeSelect') return;
+    if (autoWordsStartedRef.current) return;
+    const items = buildMixedWordPhraseItems(words);
+    if (items.length === 0) return;
+    autoWordsStartedRef.current = true;
+    startWordsFlow();
+  }, [autoStartWordsParam, weekDataLoading, phase, words, startWordsFlow]);
 
   const startSentencesTypeFlow = () => {
     const items = buildSentenceItems(passages);
@@ -492,6 +553,7 @@ export default function DictationScreen() {
     setQueueSnapshot(items.map((x) => ({ ...x })));
     setFlowKind('sentencesType');
     setIdx(0);
+    setWrongSentences([]);
     setInputText('');
     setResultsRows([]);
     setPhase('sentencesTypeActive');
@@ -590,11 +652,49 @@ export default function DictationScreen() {
     setQueue(snap);
     setIdx(0);
     setAnswers([]);
+    setWrongWords([]);
+    setWrongSentences([]);
     setInputText('');
     setResultsRows([]);
     if (flowKind === 'words') setPhase('wordsActive');
     else if (flowKind === 'sentencesType') setPhase('sentencesTypeActive');
     else if (flowKind === 'sentencesPaper') setPhase('sentencesPaperActive');
+  };
+
+  const redoWrongSentencesOnly = () => {
+    if (wrongSentences.length === 0) return;
+    // Align by index with current `queue` (subset after a prior "redo wrong"), not `queueSnapshot`.
+    const items = resultsRows
+      .map((r, i) => (!r.correct && queue[i] ? { ...queue[i] } : null))
+      .filter(Boolean);
+    if (items.length === 0) return;
+    setQueue(items.map((x, i) => ({ ...x, id: `${x.id}-redo-${i}` })));
+    setIdx(0);
+    setInputText('');
+    setResultsRows([]);
+    setWrongSentences([]);
+    setPhase('sentencesTypeActive');
+  };
+
+  const redoAllSentences = () => {
+    if (flowKind !== 'sentencesType') return;
+    const snap = queueSnapshot.length ? queueSnapshot.map((x) => ({ ...x })) : [];
+    setQueue(snap);
+    setIdx(0);
+    setInputText('');
+    setResultsRows([]);
+    setWrongSentences([]);
+    setPhase('sentencesTypeActive');
+  };
+
+  /** Paper mode: restart full sentence list from sentence 1. */
+  const redoAllPaperSentences = () => {
+    if (flowKind !== 'sentencesPaper') return;
+    const snap = queueSnapshot.length ? queueSnapshot.map((x) => ({ ...x })) : [];
+    if (snap.length === 0) return;
+    setQueue(snap);
+    setIdx(0);
+    setPhase('sentencesPaperActive');
   };
 
   const score = resultsRows.filter((r) => r.correct).length;
@@ -888,63 +988,124 @@ export default function DictationScreen() {
           </View>
         ) : null}
 
-        {phase === 'results' ? (
+        {phase === 'results' && flowKind === 'words' ? (
           <View style={styles.block}>
-            <Text style={styles.scoreBig}>
-              {score} / {scoreTotal}
+            <Text style={styles.wordsScoreTitle}>
+              {score} / {scoreTotal} correct
             </Text>
-            <Text style={styles.encourage}>{scoreMessage(scorePct)}</Text>
 
             {resultsRows.map((row, i) => (
-              <View key={`r-${i}`} style={styles.resultCard}>
-                {row.tag ? (
-                  <Text style={[styles.miniTag, row.tag === 'phrase' ? styles.tagPhraseTxt : styles.tagWordTxt]}>
-                    {row.tag}
-                  </Text>
-                ) : null}
+              <View key={`w-r-${i}`} style={styles.wordsResultRow}>
                 {row.correct ? (
-                  <Text style={styles.resultOk}>
-                    ✓ <Text style={styles.resultOkStrong}>{row.expected}</Text>
+                  <Text style={styles.wordsResultOkLine}>
+                    ✓ <Text style={styles.wordsResultOkWord}>{row.expected}</Text>
                   </Text>
                 ) : (
                   <View>
-                    <Text style={styles.resultBad}>✗ Incorrect</Text>
-                    <Text style={styles.resultLabel}>You typed:</Text>
-                    <StudentAnswerHighlights typed={row.typed} expected={row.expected} />
-                    <Text style={styles.resultLabel}>Correct answer:</Text>
-                    <Text style={styles.resultExpected}>{row.expected}</Text>
+                    <Text style={styles.wordsResultWrongLine}>
+                      ✗ <Text style={styles.wordsResultWrongWord}>{row.expected}</Text>
+                    </Text>
+                    <Text style={styles.wordsResultYouTyped}>
+                      You typed: {String(row.typed ?? '').trim() || '(empty)'}
+                    </Text>
                   </View>
                 )}
               </View>
             ))}
 
-            <TouchableOpacity style={styles.primaryBtn} onPress={onTryAgain} activeOpacity={0.85}>
-              <Text style={styles.primaryBtnText}>Try again →</Text>
+            {wrongWords.length > 0 ? (
+              <TouchableOpacity
+                style={styles.reviewOrangeBtn}
+                onPress={() =>
+                  router.push({
+                    pathname: '/review',
+                    params: { wrongWords: JSON.stringify(wrongWords) },
+                  })
+                }
+                activeOpacity={0.85}
+              >
+                <Text style={styles.reviewOrangeBtnText}>
+                  Review {wrongWords.length} wrong word{wrongWords.length === 1 ? '' : 's'}
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+
+            <TouchableOpacity style={styles.secondaryBtn} onPress={onTryAgain} activeOpacity={0.85}>
+              <Text style={styles.secondaryBtnText}>Redo all words</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.secondaryBtn} onPress={() => router.push('/home')} activeOpacity={0.85}>
-              <Text style={styles.secondaryBtnText}>Back to Home</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.textLink} onPress={() => router.back()}>
-              <Text style={styles.textLinkLabel}>← Back</Text>
+            <TouchableOpacity style={styles.homeGrayBtn} onPress={() => router.push('/home')} activeOpacity={0.85}>
+              <Text style={styles.homeGrayBtnText}>Back to home</Text>
             </TouchableOpacity>
           </View>
         ) : null}
 
-        {phase === 'answerReveal' ? (
+        {phase === 'results' && flowKind === 'sentencesType' ? (
           <View style={styles.block}>
-            <Text style={styles.revealTitle}>Check your answers</Text>
-            <Text style={styles.revealSub}>SpellSmart has the answers — check what you wrote!</Text>
-            {queue.map((item, i) => (
-              <View key={item.id} style={styles.revealCard}>
-                <Text style={styles.revealNum}>Sentence {i + 1}</Text>
-                <Text style={styles.revealBody}>{item.text}</Text>
+            <Text style={styles.wordsScoreTitle}>
+              {score} / {scoreTotal} correct
+            </Text>
+
+            {resultsRows.map((row, i) => (
+              <View key={`sent-r-${i}`} style={styles.sentenceResultRow}>
+                {row.correct ? (
+                  <Text style={styles.sentenceResultOkLine}>
+                    ✓{' '}
+                    <Text style={styles.sentenceResultOkPreview}>{truncateSentencePreview(row.expected)}</Text>
+                  </Text>
+                ) : (
+                  <View>
+                    <Text style={styles.sentenceResultWrongLine}>
+                      ✗{' '}
+                      <Text style={styles.sentenceResultWrongPreview}>
+                        {truncateSentencePreview(row.expected)}
+                      </Text>
+                    </Text>
+                    <Text style={styles.sentenceWrongCmp}>
+                      {firstWrongWordComparison(row.typed, row.expected)}
+                    </Text>
+                  </View>
+                )}
               </View>
             ))}
-            <TouchableOpacity style={styles.primaryBtn} onPress={() => router.push('/home')} activeOpacity={0.85}>
-              <Text style={styles.primaryBtnText}>Done! →</Text>
+
+            {wrongSentences.length > 0 ? (
+              <TouchableOpacity
+                style={styles.redoWrongOutlineBtn}
+                onPress={redoWrongSentencesOnly}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.redoWrongOutlineBtnText}>
+                  Redo wrong sentences ({wrongSentences.length})
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+
+            <TouchableOpacity style={styles.secondaryBtn} onPress={redoAllSentences} activeOpacity={0.85}>
+              <Text style={styles.secondaryBtnText}>Redo all sentences</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.textLink} onPress={() => router.back()}>
-              <Text style={styles.textLinkLabel}>← Back</Text>
+            <TouchableOpacity style={styles.homeGrayBtn} onPress={() => router.push('/home')} activeOpacity={0.85}>
+              <Text style={styles.homeGrayBtnText}>Back to home</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        {phase === 'answerReveal' && flowKind === 'sentencesPaper' ? (
+          <View style={styles.block}>
+            <Text style={styles.revealTitle}>Check your answers</Text>
+            <Text style={styles.paperResultsSubtitle}>Compare with the correct sentences below</Text>
+            {queue.map((item, i) => (
+              <View key={item.id} style={styles.paperAnswerItem}>
+                <Text style={styles.paperSentenceNumberLabel}>Sentence {i + 1}</Text>
+                <View style={styles.paperGreenAnswerBox}>
+                  <Text style={styles.paperGreenAnswerText}>{item.text}</Text>
+                </View>
+              </View>
+            ))}
+            <TouchableOpacity style={styles.primaryBtn} onPress={redoAllPaperSentences} activeOpacity={0.85}>
+              <Text style={styles.primaryBtnText}>Redo all sentences →</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.homeGrayBtn} onPress={() => router.push('/home')} activeOpacity={0.85}>
+              <Text style={styles.homeGrayBtnText}>Back to home</Text>
             </TouchableOpacity>
           </View>
         ) : null}
@@ -1164,6 +1325,99 @@ const styles = StyleSheet.create({
     color: '#444',
     textAlign: 'center',
   },
+  wordsScoreTitle: {
+    fontSize: 34,
+    fontWeight: '800',
+    color: BLUE,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  wordsResultRow: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    paddingVertical: 12,
+  },
+  wordsResultOkLine: {
+    fontSize: 18,
+    color: '#1b5e20',
+  },
+  wordsResultOkWord: {
+    color: '#222',
+    fontWeight: '600',
+  },
+  wordsResultWrongLine: {
+    fontSize: 18,
+    color: '#b71c1c',
+  },
+  wordsResultWrongWord: {
+    color: '#b71c1c',
+    fontWeight: '700',
+  },
+  wordsResultYouTyped: {
+    fontSize: 14,
+    color: '#c62828',
+    marginTop: 6,
+  },
+  reviewOrangeBtn: {
+    backgroundColor: '#e65100',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  reviewOrangeBtnText: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  homeGrayBtn: {
+    backgroundColor: '#9e9e9e',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  homeGrayBtnText: {
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  sentenceResultRow: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    paddingVertical: 12,
+  },
+  sentenceResultOkLine: {
+    fontSize: 17,
+    color: '#1b5e20',
+  },
+  sentenceResultOkPreview: {
+    color: '#222',
+    fontWeight: '600',
+  },
+  sentenceResultWrongLine: {
+    fontSize: 17,
+    color: '#b71c1c',
+  },
+  sentenceResultWrongPreview: {
+    color: '#b71c1c',
+    fontWeight: '700',
+  },
+  sentenceWrongCmp: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 6,
+  },
+  redoWrongOutlineBtn: {
+    borderWidth: 2,
+    borderColor: '#c62828',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  redoWrongOutlineBtnText: {
+    color: '#c62828',
+    fontSize: 17,
+    fontWeight: '700',
+  },
   scoreBig: {
     fontSize: 40,
     fontWeight: '800',
@@ -1245,28 +1499,32 @@ const styles = StyleSheet.create({
     color: '#222',
     textAlign: 'center',
   },
-  revealSub: {
+  paperResultsSubtitle: {
     fontSize: 16,
     color: '#666',
     textAlign: 'center',
-    marginBottom: 12,
+    marginBottom: 16,
     lineHeight: 22,
   },
-  revealCard: {
-    backgroundColor: '#f0f0f0',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+  paperAnswerItem: {
+    gap: 8,
   },
-  revealNum: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: BLUE,
-    marginBottom: 8,
-  },
-  revealBody: {
+  paperSentenceNumberLabel: {
     fontSize: 16,
-    color: '#333',
+    fontWeight: '700',
+    color: '#222',
+  },
+  paperGreenAnswerBox: {
+    backgroundColor: '#e8f5e9',
+    borderWidth: 1,
+    borderColor: '#a5d6a7',
+    borderRadius: 12,
+    padding: 14,
+  },
+  paperGreenAnswerText: {
+    fontSize: 16,
+    color: '#1b5e20',
     lineHeight: 24,
+    fontWeight: '500',
   },
 });

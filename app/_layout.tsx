@@ -7,6 +7,8 @@ export default function RootLayout() {
       screenOptions={{
         headerShown: false,
       }}
-    />
+    >
+      <Stack.Screen name="review" options={{ headerShown: true, title: 'Review' }} />
+    </Stack>
   );
 }

@@ -12,6 +12,10 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../../lib/supabase';
 
+function isValidWeekLabel(wl) {
+  return wl != null && String(wl).trim() !== '';
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -58,7 +62,8 @@ export default function HomeScreen() {
           const grouped = new Map();
           for (const row of rows) {
             if (row?.word == null || row.word === '') continue;
-            const weekLabel = String(row?.week_label ?? '');
+            const weekLabel = String(row?.week_label ?? '').trim();
+            if (!isValidWeekLabel(weekLabel)) continue;
             if (!grouped.has(weekLabel)) {
               grouped.set(weekLabel, { words: [], passages: [], latestCreatedAt: 0 });
             }
@@ -88,7 +93,8 @@ export default function HomeScreen() {
           for (const row of passageRows) {
             const body = String(row?.body ?? '').trim();
             if (!body) continue;
-            const weekLabel = String(row?.week_label ?? '');
+            const weekLabel = String(row?.week_label ?? '').trim();
+            if (!isValidWeekLabel(weekLabel)) continue;
             if (!grouped.has(weekLabel)) {
               grouped.set(weekLabel, { words: [], passages: [], latestCreatedAt: 0 });
             }
@@ -102,6 +108,7 @@ export default function HomeScreen() {
           }
 
           const groups = Array.from(grouped.entries())
+            .filter(([weekLabel]) => isValidWeekLabel(weekLabel))
             .map(([weekLabel, bucket]) => ({
               weekLabel,
               words: bucket.words,
@@ -253,7 +260,9 @@ export default function HomeScreen() {
 
         {!loading && !errorMsg ? (
           <ScrollView style={styles.weekList} contentContainerStyle={styles.weekListContent}>
-            {weekGroups.map((group) => {
+            {weekGroups
+              .filter((group) => isValidWeekLabel(group.weekLabel))
+              .map((group) => {
               const active = group.weekLabel === selectedWeek;
               return (
                 <View
@@ -287,10 +296,8 @@ export default function HomeScreen() {
 
       <View style={styles.selectedCard}>
         <Text style={styles.selectedTitle}>
-          {selectedGroup
-            ? selectedGroup.weekLabel === ''
-              ? '(no label)'
-              : selectedGroup.weekLabel
+          {selectedGroup && isValidWeekLabel(selectedGroup.weekLabel)
+            ? selectedGroup.weekLabel
             : 'Select a Week'}
         </Text>
         <ScrollView style={styles.selectedList} contentContainerStyle={styles.selectedListContent}>

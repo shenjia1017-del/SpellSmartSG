@@ -2,6 +2,7 @@ import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -279,6 +280,8 @@ export default function DictationScreen() {
   const [queueSnapshot, setQueueSnapshot] = useState([]);
   const [idx, setIdx] = useState(0);
   const [inputText, setInputText] = useState('');
+  /** Words & Phrases mode only: typed answer per question index (restored on Prev). */
+  const [answers, setAnswers] = useState([]);
   const [ttsBusy, setTtsBusy] = useState(false);
   /** After first successful playback for current item, main play button shows "Play again". */
   const [hasPlayed, setHasPlayed] = useState(false);
@@ -292,6 +295,8 @@ export default function DictationScreen() {
   flowKindRef.current = flowKind;
   /** Timestamp of last finished sentence TTS (sentence dictation modes only). */
   const lastSentenceEndAtRef = useRef(0);
+  /** Set true before `setIdx` when paper mode "Done, next" should trigger TTS for the new sentence. */
+  const paperAutoAdvanceRef = useRef(false);
 
   const current = queue[idx] ?? null;
   const total = queue.length;
@@ -342,6 +347,12 @@ export default function DictationScreen() {
   useEffect(() => {
     if (idx === 0) lastSentenceEndAtRef.current = 0;
   }, [idx]);
+
+  // Restore typed answer when question index changes (words mode only). Omit `answers` from deps so keystrokes are not reset when `answers` updates.
+  useEffect(() => {
+    if (phase !== 'wordsActive') return;
+    setInputText(answers[idx] ?? '');
+  }, [phase, idx]);
 
   useLayoutEffect(() => {
     let title = 'Dictation';
@@ -438,6 +449,27 @@ export default function DictationScreen() {
     }
   };
 
+  useEffect(() => {
+    if (phase !== 'sentencesPaperActive' || !paperAutoAdvanceRef.current) return;
+    paperAutoAdvanceRef.current = false;
+    const row = queue[idx];
+    const raw = String(row?.text ?? '').trim();
+    if (!raw) return;
+    void (async () => {
+      if (idx > 0 && lastSentenceEndAtRef.current > 0) {
+        const elapsed = Date.now() - lastSentenceEndAtRef.current;
+        if (elapsed < SENTENCE_GAP_MS) {
+          await new Promise((r) => setTimeout(r, SENTENCE_GAP_MS - elapsed));
+        }
+      }
+      const ttsInput = sentenceTextToTtsInput(raw);
+      await playTts(ttsInput, {
+        speed: TTS_SPEED_SENTENCES,
+      });
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- playTts omitted to avoid redundant effect runs
+  }, [idx, phase, queue]);
+
   const startWordsFlow = () => {
     const items = buildMixedWordPhraseItems(words);
     if (items.length === 0) {
@@ -447,6 +479,7 @@ export default function DictationScreen() {
     setQueueSnapshot(items.map((x) => ({ ...x })));
     setFlowKind('words');
     setIdx(0);
+    setAnswers([]);
     setInputText('');
     setResultsRows([]);
     setPhase('wordsActive');
@@ -478,6 +511,29 @@ export default function DictationScreen() {
 
   const onNextWordsOrTypeSentence = () => {
     if (!current) return;
+    if (phase === 'wordsActive') {
+      setAnswers((prev) => {
+        const copy = [...prev];
+        copy[idx] = inputText;
+        return copy;
+      });
+      const typed = inputText;
+      const correct = answersMatch(typed, current.text);
+      const row = {
+        expected: current.text,
+        typed,
+        correct,
+        tag: current.tag ?? null,
+      };
+      const isLast = idx + 1 >= queue.length;
+      setResultsRows((prev) => [...prev, row]);
+      if (isLast) {
+        setPhase('results');
+      } else {
+        setIdx((i) => i + 1);
+      }
+      return;
+    }
     if (phase === 'sentencesTypeActive' && !sentenceNextReady) return;
     const typed = inputText;
     const correct = answersMatch(typed, current.text);
@@ -497,12 +553,35 @@ export default function DictationScreen() {
     }
   };
 
+  const onPrevWords = () => {
+    if (phase !== 'wordsActive' || idx <= 0) return;
+    setAnswers((prev) => {
+      const copy = [...prev];
+      copy[idx] = inputText;
+      return copy;
+    });
+    setResultsRows((prev) => prev.slice(0, -1));
+    setIdx((i) => i - 1);
+  };
+
+  const confirmQuitWords = () => {
+    Alert.alert('Quit dictation?', 'Your progress will be lost. Are you sure?', [
+      {
+        text: 'Yes, quit',
+        style: 'destructive',
+        onPress: () => router.push('/home'),
+      },
+      { text: 'Keep going', style: 'cancel' },
+    ]);
+  };
+
   const onPaperNext = () => {
-    if (phase === 'sentencesPaperActive' && !sentenceNextReady) return;
+    if (phase !== 'sentencesPaperActive' || !hasPlayed) return;
     if (idx + 1 >= queue.length) {
       setPhase('answerReveal');
       return;
     }
+    paperAutoAdvanceRef.current = true;
     setIdx((i) => i + 1);
   };
 
@@ -510,10 +589,12 @@ export default function DictationScreen() {
     const snap = queueSnapshot.length ? queueSnapshot.map((x) => ({ ...x })) : [];
     setQueue(snap);
     setIdx(0);
+    setAnswers([]);
     setInputText('');
     setResultsRows([]);
     if (flowKind === 'words') setPhase('wordsActive');
     else if (flowKind === 'sentencesType') setPhase('sentencesTypeActive');
+    else if (flowKind === 'sentencesPaper') setPhase('sentencesPaperActive');
   };
 
   const score = resultsRows.filter((r) => r.correct).length;
@@ -548,9 +629,20 @@ export default function DictationScreen() {
       const ttsInput = isSentenceFlow ? sentenceTextToTtsInput(raw) : raw;
       await playTts(ttsInput, {
         speed: TTS_SPEED_SENTENCES,
-        onPlaybackEnd: startPostPlaybackCountdown,
+        ...(fk === 'sentencesPaper' ? {} : { onPlaybackEnd: startPostPlaybackCountdown }),
       });
     })();
+  };
+
+  const confirmQuitPaper = () => {
+    Alert.alert('Quit dictation?', 'Your progress will be lost. Are you sure?', [
+      {
+        text: 'Yes, quit',
+        style: 'destructive',
+        onPress: () => router.push('/home'),
+      },
+      { text: 'Keep going', style: 'cancel' },
+    ]);
   };
 
   return (
@@ -689,21 +781,62 @@ export default function DictationScreen() {
               multiline={phase === 'sentencesTypeActive'}
             />
 
-            <TouchableOpacity
-              style={[
-                styles.primaryBtn,
-                phase === 'sentencesTypeActive' && !sentenceNextReady && styles.btnDisabled,
-              ]}
-              onPress={onNextWordsOrTypeSentence}
-              disabled={phase === 'sentencesTypeActive' && !sentenceNextReady}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.primaryBtnText}>Next →</Text>
-            </TouchableOpacity>
+            {phase === 'wordsActive' ? (
+              <>
+                <View style={styles.wordsNavRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.wordsPrevBtn,
+                      idx === 0 && styles.wordsPrevBtnDisabled,
+                    ]}
+                    onPress={onPrevWords}
+                    disabled={idx === 0}
+                    activeOpacity={0.85}
+                  >
+                    <Text
+                      style={[
+                        styles.wordsPrevBtnText,
+                        idx === 0 && styles.wordsPrevBtnTextDisabled,
+                      ]}
+                    >
+                      ← Prev
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.primaryBtnWordsNext}
+                    onPress={onNextWordsOrTypeSentence}
+                    activeOpacity={0.85}
+                  >
+                    <Text style={styles.primaryBtnText}>Next →</Text>
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity
+                  style={styles.quitLink}
+                  onPress={confirmQuitWords}
+                  hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}
+                >
+                  <Text style={styles.quitLinkText}>✕ Quit</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={[
+                    styles.primaryBtn,
+                    phase === 'sentencesTypeActive' && !sentenceNextReady && styles.btnDisabled,
+                  ]}
+                  onPress={onNextWordsOrTypeSentence}
+                  disabled={phase === 'sentencesTypeActive' && !sentenceNextReady}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.primaryBtnText}>Next →</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity style={styles.textLink} onPress={() => router.back()}>
-              <Text style={styles.textLinkLabel}>← Back</Text>
-            </TouchableOpacity>
+                <TouchableOpacity style={styles.textLink} onPress={() => router.back()}>
+                  <Text style={styles.textLinkLabel}>← Back</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         ) : null}
 
@@ -727,35 +860,30 @@ export default function DictationScreen() {
               disabled={ttsBusy}
               activeOpacity={0.85}
             >
-              {ttsBusy ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.playBigText}>
-                  {hasPlayed ? '🔊 Play again' : '🔊 Play'}
-                </Text>
-              )}
+              <Text style={styles.playBigText}>
+                {ttsBusy ? '🔊 Playing...' : hasPlayed ? '🔊 Play again' : '🔊 Play'}
+              </Text>
             </TouchableOpacity>
 
-            {sentenceCountdown != null ? (
-              <Text style={styles.countdownHint}>Next in {sentenceCountdown}...</Text>
-            ) : null}
-            {!sentenceNextReady && sentenceCountdown == null && !ttsBusy ? (
-              <Text style={styles.hintMuted}>
-                Tap Play to listen. After the audio, a 3-second countdown runs before you can go to the next sentence.
-              </Text>
-            ) : null}
+            <Text style={styles.hintMuted}>
+              Tap Play to hear the sentence, write it on paper, then tap Done when ready for the next.
+            </Text>
 
             <TouchableOpacity
-              style={[styles.primaryBtn, !sentenceNextReady && styles.btnDisabled]}
+              style={[styles.primaryBtn, !hasPlayed && styles.paperDoneDimmed]}
               onPress={onPaperNext}
-              disabled={!sentenceNextReady}
+              disabled={!hasPlayed}
               activeOpacity={0.85}
             >
               <Text style={styles.primaryBtnText}>Done, next →</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.textLink} onPress={() => router.back()}>
-              <Text style={styles.textLinkLabel}>← Back</Text>
+            <TouchableOpacity
+              style={styles.quitLink}
+              onPress={confirmQuitPaper}
+              hitSlop={{ top: 12, bottom: 12, left: 24, right: 24 }}
+            >
+              <Text style={styles.quitLinkText}>✕ Quit</Text>
             </TouchableOpacity>
           </View>
         ) : null}
@@ -855,6 +983,52 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     alignItems: 'center',
   },
+  wordsNavRow: {
+    flexDirection: 'row',
+    gap: 10,
+    alignSelf: 'stretch',
+    alignItems: 'stretch',
+  },
+  wordsPrevBtn: {
+    flex: 1,
+    backgroundColor: '#fff',
+    borderWidth: 2,
+    borderColor: BLUE,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  wordsPrevBtnDisabled: {
+    borderColor: '#ccc',
+    backgroundColor: '#f5f5f5',
+  },
+  wordsPrevBtnText: {
+    color: BLUE,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  wordsPrevBtnTextDisabled: {
+    color: '#999',
+  },
+  primaryBtnWordsNext: {
+    flex: 1,
+    backgroundColor: BLUE,
+    borderRadius: 14,
+    paddingVertical: 18,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quitLink: {
+    alignSelf: 'center',
+    paddingVertical: 10,
+  },
+  quitLinkText: {
+    color: '#c00',
+    fontSize: 15,
+    fontWeight: '600',
+  },
   primaryBtnText: {
     color: '#fff',
     fontSize: 18,
@@ -868,6 +1042,9 @@ const styles = StyleSheet.create({
   },
   btnDisabled: {
     opacity: 0.45,
+  },
+  paperDoneDimmed: {
+    opacity: 0.4,
   },
   secondaryBtn: {
     borderWidth: 2,

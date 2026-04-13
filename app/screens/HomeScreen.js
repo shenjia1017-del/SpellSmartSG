@@ -11,6 +11,8 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../../lib/supabase';
+import { completeWeek } from '../lib/gardenHelpers';
+import WeekCompleteModal from '../components/WeekCompleteModal';
 
 function isValidWeekLabel(wl) {
   return wl != null && String(wl).trim() !== '';
@@ -22,6 +24,10 @@ export default function HomeScreen() {
   const [errorMsg, setErrorMsg] = useState('');
   const [weekGroups, setWeekGroups] = useState([]);
   const [selectedWeek, setSelectedWeek] = useState('');
+  const [modalVisible, setModalVisible] = useState(false);
+  const [modalFlower, setModalFlower] = useState(null);
+  const [modalCreature, setModalCreature] = useState(null);
+  const [modalTotalFlowers, setModalTotalFlowers] = useState(0);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -178,6 +184,23 @@ export default function HomeScreen() {
     }
   };
 
+  const handleCompleteWeek = async () => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData?.session?.user?.id;
+      if (!userId || !selectedGroup?.weekLabel) return;
+      const result = await completeWeek(userId, selectedGroup.weekLabel);
+      if (result) {
+        setModalFlower(result.flower);
+        setModalCreature(result.newCreature);
+        setModalTotalFlowers(result.totalFlowers);
+        setModalVisible(true);
+      }
+    } catch (e) {
+      console.log('completeWeek error:', e.message);
+    }
+  };
+
   const confirmDeleteWeek = (group) => {
     const labelDisplay = group.weekLabel === '' ? '(no label)' : group.weekLabel;
     const count = group.words.length;
@@ -207,6 +230,13 @@ export default function HomeScreen() {
         onPress={() => router.push('/import')}
       >
         <Text style={styles.buttonText}>Import Word List</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[styles.button, { backgroundColor: '#f0f0f0', marginBottom: 10 }]}
+        onPress={() => router.push('/album')}
+      >
+        <Text style={[styles.buttonText, { color: '#333' }]}>My Album 🌸</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
@@ -250,6 +280,18 @@ export default function HomeScreen() {
         disabled={!selectedWeek || !selectedGroup || selectedGroup.words.length === 0}
       >
         <Text style={styles.dictationOutlineButtonText}>Dictation Test 📝</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[
+          styles.button,
+          { backgroundColor: '#34c759', marginTop: 10 },
+          (!selectedWeek || !selectedGroup || selectedGroup.words.length === 0) && styles.buttonDisabled,
+        ]}
+        onPress={handleCompleteWeek}
+        disabled={!selectedWeek || !selectedGroup || selectedGroup.words.length === 0}
+      >
+        <Text style={styles.buttonText}>Complete this week 🌼</Text>
       </TouchableOpacity>
       {!selectedWeek ? <Text style={styles.selectWeekHint}>Please select a week first</Text> : null}
 
@@ -337,6 +379,18 @@ export default function HomeScreen() {
           )}
         </ScrollView>
       </View>
+
+      <WeekCompleteModal
+        visible={modalVisible}
+        flower={modalFlower}
+        newCreature={modalCreature}
+        totalFlowers={modalTotalFlowers}
+        onViewAlbum={() => {
+          setModalVisible(false);
+          router.push('/album');
+        }}
+        onClose={() => setModalVisible(false)}
+      />
     </View>
   );
 }

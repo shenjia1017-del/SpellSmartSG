@@ -13,6 +13,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../../lib/supabase';
 import { completeWeek } from '../lib/gardenHelpers';
 import WeekCompleteModal from '../components/WeekCompleteModal';
+import LottieView from 'lottie-react-native';
 
 function isValidWeekLabel(wl) {
   return wl != null && String(wl).trim() !== '';
@@ -222,6 +223,14 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
+      <View style={styles.mascotContainer}>
+        <LottieView
+          source={require('../../assets/animations/Trilo-5.json')}
+          autoPlay
+          loop
+          style={styles.mascot}
+        />
+      </View>
       <Text style={styles.title}>This Week's Words</Text>
       <Text style={styles.subtitle}>{totalCount} words imported</Text>
 
@@ -403,6 +412,14 @@ const styles = StyleSheet.create({
     paddingTop: 70,
     paddingHorizontal: 16,
     paddingBottom: 24,
+  },
+  mascotContainer: {
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  mascot: {
+    width: 120,
+    height: 120,
   },
   title: {
     fontSize: 28,

@@ -1185,7 +1185,7 @@ export default function PracticeScreen() {
                             }
                           }}
                         >
-                          <Text style={styles.slotText}>{slot ? stripPipeDisplay(slot.text) : ''}</Text>
+                          <Text style={styles.slotText}>{slot ? stripPipeDisplay(String(slot)) : ''}</Text>
                         </Pressable>
                       );
                     })}
@@ -1358,6 +1358,18 @@ export default function PracticeScreen() {
                   activeOpacity={0.65}
                 >
                   <Text style={styles.kbdBackspaceText}>⌫</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={styles.spaceRow}>
+                <TouchableOpacity
+                  style={[styles.kbdKey, styles.spaceKey]}
+                  onPress={() => {
+                    void onSpellKey(' ');
+                  }}
+                  disabled={spellingDone}
+                  activeOpacity={0.65}
+                >
+                  <Text style={styles.spaceKeyText}>SPACE</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1891,6 +1903,34 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 17,
     fontWeight: '600',
+  },
+  spaceKey: {
+    width: '100%',
+    maxWidth: '100%',
+    minWidth: 0,
+    flexBasis: '100%',
+    flexGrow: 0,
+    flexShrink: 0,
+    height: 42,
+    backgroundColor: 'white',
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+  },
+  spaceRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    width: '100%',
+    marginTop: 4,
+  },
+  spaceKeyText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111',
+    letterSpacing: 0.4,
   },
   checkBtn: {
     marginTop: 20,

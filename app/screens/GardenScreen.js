@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, StyleSheet, ScrollView,
   ActivityIndicator, TouchableOpacity
@@ -28,9 +29,11 @@ export default function GardenScreen() {
   const [modalCreature, setModalCreature] = useState(null);
   const [modalTotalFlowers, setModalTotalFlowers] = useState(0);
 
-  useEffect(() => {
-    loadWeeks();
-  }, []);
+  useFocusEffect(
+    React.useCallback(() => {
+      loadWeeks();
+    }, [])
+  );
 
   useEffect(() => {
     if (selectedWeek) loadMastery();

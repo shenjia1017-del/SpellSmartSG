@@ -18,7 +18,13 @@ export default function GardenScreen({ weekLabel }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (weekLabel) loadData();
+    if (!weekLabel) {
+      setLoading(false);
+      setWords([]);
+      setMastery({});
+      return;
+    }
+    loadData();
   }, [weekLabel]);
 
   async function loadData() {
@@ -45,6 +51,14 @@ export default function GardenScreen({ weekLabel }) {
   const allBlooming = total > 0 && bloomCount === total;
 
   if (loading) return <ActivityIndicator style={{ flex: 1, marginTop: 60 }} />;
+
+  if (!weekLabel) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <Text style={styles.missingWeek}>Pick a week on Home, then open Garden with that week.</Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
@@ -89,6 +103,8 @@ export default function GardenScreen({ weekLabel }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
+  centered: { justifyContent: 'center', alignItems: 'center', padding: 24 },
+  missingWeek: { fontSize: 15, color: '#666', textAlign: 'center', lineHeight: 22 },
   content: { padding: 20, paddingBottom: 40 },
   title: { fontSize: 22, fontWeight: '700', color: '#1a1a1a', marginBottom: 4 },
   subtitle: { fontSize: 14, color: '#888', marginBottom: 10 },

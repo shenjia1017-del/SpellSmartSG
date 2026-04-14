@@ -1,13 +1,13 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import React from 'react';
 import {
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const BLUE = '#378ADD';
 
@@ -31,7 +31,12 @@ export default function ReviewScreen() {
   const n = wrongWords.length;
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <LinearGradient colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']} style={styles.safe}>
+      <View style={styles.bgDecor} pointerEvents="none">
+        <View style={[styles.cloud, { top: 38, left: 18, width: 80, height: 36 }]} />
+        <View style={[styles.cloud, { top: 28, left: 55, width: 60, height: 28 }]} />
+        <View style={styles.sun} />
+      </View>
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         <Text style={styles.title}>Review</Text>
         <Text style={styles.subtitle}>
@@ -86,14 +91,25 @@ export default function ReviewScreen() {
           <Text style={styles.homeGrayBtnText}>← Back to home</Text>
         </TouchableOpacity>
       </ScrollView>
-    </SafeAreaView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   safe: {
     flex: 1,
-    backgroundColor: '#fff',
+  },
+  bgDecor: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  cloud: { position: 'absolute', backgroundColor: 'white', borderRadius: 99, opacity: 0.85 },
+  sun: {
+    position: 'absolute',
+    top: 32,
+    right: 24,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FFD740',
+    opacity: 0.8,
   },
   scroll: {
     padding: 20,

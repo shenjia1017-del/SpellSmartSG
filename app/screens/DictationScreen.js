@@ -22,6 +22,7 @@ import {
   TTS_VOICE_WORD,
 } from '../../lib/phonics';
 import { supabase } from '../../lib/supabase';
+import { updateWordMastery } from '../lib/gardenHelpers';
 
 const BLUE = '#378ADD';
 const GREEN_PHRASE = '#2e7d32';
@@ -572,7 +573,7 @@ export default function DictationScreen() {
     setPhase('sentencesPaperActive');
   };
 
-  const onNextWordsOrTypeSentence = () => {
+  const onNextWordsOrTypeSentence = async () => {
     if (!current) return;
     if (phase === 'wordsActive') {
       setAnswers((prev) => {
@@ -588,6 +589,21 @@ export default function DictationScreen() {
         correct,
         tag: current.tag ?? null,
       };
+      const { data: { user } = {} } = await supabase.auth.getUser();
+      if (user) {
+        const currentWord = current.text;
+        const wordObj = words.find((w) =>
+          (typeof w === 'string' ? w : w.word) === currentWord
+        );
+        if (wordObj?.id) {
+          await updateWordMastery(
+            user.id,
+            wordObj.id,
+            String(wordObj.week_label ?? current.week_label ?? weekLabelForQuery ?? ''),
+            correct
+          );
+        }
+      }
       const isLast = idx + 1 >= queue.length;
       setResultsRows((prev) => [...prev, row]);
       if (isLast) {

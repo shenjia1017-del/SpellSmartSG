@@ -266,7 +266,7 @@ export default function HomeScreen() {
         {totalCount === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>No words yet!</Text>
-            <Text style={styles.emptySubtitle}>Import this week's word list to get started</Text>
+            <Text style={styles.emptySubtitle}>Import this week&apos;s word list to get started</Text>
           </View>
         ) : null}
 
@@ -375,51 +375,6 @@ export default function HomeScreen() {
             })}
         </View>
 
-        {selectedGroup ? (
-          <View style={styles.selectedCard}>
-            <Text style={styles.selectedTitle}>
-              {selectedGroup && isValidWeekLabel(selectedGroup.weekLabel)
-                ? selectedGroup.weekLabel
-                : 'Select a Week'}
-            </Text>
-            <ScrollView style={styles.selectedList} contentContainerStyle={styles.selectedListContent}>
-              {selectedGroup ? (
-                <>
-                  <Text style={styles.sectionHeading}>Words & Phrases</Text>
-                  {selectedGroup.words?.map((row, idx) => {
-                    const word = typeof row === 'string' ? row : row?.word ?? '';
-                    return (
-                      <Text key={`${String(word)}-${idx}`} style={styles.wordItem}>
-                        {idx + 1}. {word}
-                      </Text>
-                    );
-                  })}
-                  {selectedGroup.words.length === 0 && (
-                    <Text style={styles.emptyInline}>No words in this week.</Text>
-                  )}
-                  {selectedGroup.passages?.length > 0 ? (
-                    <>
-                      <Text style={[styles.sectionHeading, styles.sectionHeadingAfterWords]}>
-                        Sentences
-                      </Text>
-                      {selectedGroup.passages.map((p, idx) => (
-                        <Text key={p.id != null ? String(p.id) : `passage-${idx}`} style={styles.wordItem}>
-                          {idx + 1}. {String(p.body ?? '').trim()}
-                        </Text>
-                      ))}
-                    </>
-                  ) : null}
-                  {selectedGroup.words.length === 0 &&
-                  (!selectedGroup.passages || selectedGroup.passages.length === 0) ? (
-                    <Text style={styles.emptyText}>No words or passages in this week.</Text>
-                  ) : null}
-                </>
-              ) : (
-                <Text style={styles.emptyText}>Select a week above to see words and passages.</Text>
-              )}
-            </ScrollView>
-          </View>
-        ) : null}
       </ScrollView>
 
       <WeekCompleteModal

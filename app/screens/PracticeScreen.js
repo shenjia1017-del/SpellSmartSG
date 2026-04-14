@@ -26,6 +26,7 @@ import {
   TTS_VOICE_PHONEME,
 } from '../../lib/phonics';
 import { supabase } from '../../lib/supabase';
+import { updateWordMastery } from '../lib/gardenHelpers';
 
 const BLUE = '#4A90E2';
 const GRAY = '#999';
@@ -231,6 +232,21 @@ export default function PracticeScreen() {
   const exampleSentence = String(
     paramStr(params, 'exampleSentence') || paramStr(params, 'example'),
   ).trim();
+  const wordsFromParams = useMemo(() => {
+    const raw = paramStr(params, 'wordsJSON');
+    if (!raw.trim()) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }, [params]);
+  const currentWord = useMemo(() => {
+    const target = String(word || practiceWord).trim().toLowerCase();
+    return wordsFromParams.find((w) => String(w?.word ?? '').trim().toLowerCase() === target) ?? null;
+  }, [wordsFromParams, word, practiceWord]);
+  const weekLabel = String(currentWord?.week_label ?? paramStr(params, 'weekLabel') ?? '').trim();
   const graphemesPronunciation = useMemo(() => {
     const raw = paramStr(params, 'graphemesPronunciationJSON');
     if (!raw.trim()) return {};
@@ -617,7 +633,19 @@ export default function PracticeScreen() {
     });
   };
 
-  const checkSyllables = () => {
+  const recordPracticeMastery = async (isCorrect) => {
+    const { data: { user } = {} } = await supabase.auth.getUser();
+    if (user && currentWord?.id) {
+      await updateWordMastery(
+        user.id,
+        currentWord.id,
+        weekLabel,
+        isCorrect
+      );
+    }
+  };
+
+  const checkSyllables = async () => {
     if (!sylSlots.every(Boolean)) return;
     let expected = syllablesTileList(syllables, practiceWord);
     if (expected.length === 0) {
@@ -626,6 +654,7 @@ export default function PracticeScreen() {
     const expLower = expected.map((s) => s.toLowerCase());
     const got = sylSlots.map((s) => s.text.toLowerCase());
     const ok = got.length === expLower.length && got.every((g, i) => g === expLower[i]);
+    await recordPracticeMastery(ok);
     if (ok) {
       playSuccessSound();
       runGreenFlash(sylFlash, () => {
@@ -730,7 +759,7 @@ export default function PracticeScreen() {
     }
   };
 
-  const checkPhonics = () => {
+  const checkPhonics = async () => {
     const complete = phAnswers.every((box, i) => (i === phSpaceIndexRef.current ? true : box != null));
     if (!complete) return;
     const expectedTexts = phExpectedRef.current;
@@ -739,6 +768,7 @@ export default function PracticeScreen() {
     const expNorm = expectedTexts.map(normTile);
     const got = phAnswers.map((box, i) => (i === phSpaceIndexRef.current ? normTile(' ') : normTile(box)));
     const ok = got.length === expNorm.length && got.every((g, i) => g === expNorm[i]);
+    await recordPracticeMastery(ok);
     if (ok) {
       playSuccessSound();
       runGreenFlash(phFlash, () => {
@@ -826,10 +856,12 @@ export default function PracticeScreen() {
     });
   }, [params, router]);
 
-  const checkSpelling = () => {
+  const checkSpelling = async () => {
     if (spellSlots.some((x) => x == null)) return;
     const built = spellSlots.join('');
-    if (built === practiceWord.toLowerCase()) {
+    const ok = built === practiceWord.toLowerCase();
+    await recordPracticeMastery(ok);
+    if (ok) {
       playSuccessSound();
       runGreenFlash(spFlash, () => {});
       setSpellingDone(true);
@@ -850,7 +882,9 @@ export default function PracticeScreen() {
 
   const onFillInChoicePress = (choice, index) => {
     if (fillInCorrect) return;
-    if (String(choice).toLowerCase() === practiceWord.toLowerCase()) {
+    const ok = String(choice).toLowerCase() === practiceWord.toLowerCase();
+    recordPracticeMastery(ok).catch(() => {});
+    if (ok) {
       setFillInCorrect(true);
       playSuccessSound();
       if (fillAdvanceTimerRef.current) clearTimeout(fillAdvanceTimerRef.current);

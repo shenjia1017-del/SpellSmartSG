@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { supabase } from '../../lib/supabase';
 
@@ -47,7 +48,12 @@ export default function RegisterScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <LinearGradient colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']} style={styles.container}>
+      <View style={styles.bgDecor} pointerEvents="none">
+        <View style={[styles.cloud, { top: 38, left: 18, width: 80, height: 36 }]} />
+        <View style={[styles.cloud, { top: 28, left: 55, width: 60, height: 28 }]} />
+        <View style={styles.sun} />
+      </View>
       <Text style={styles.title}>Create Account</Text>
 
       <Text style={styles.label}>Email</Text>
@@ -81,7 +87,7 @@ export default function RegisterScreen() {
       <TouchableOpacity style={styles.linkButton} onPress={() => router.push('/login')}>
         <Text style={styles.linkText}>Already have an account? Log in</Text>
       </TouchableOpacity>
-    </View>
+    </LinearGradient>
   );
 }
 
@@ -90,8 +96,19 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
     paddingHorizontal: 20,
+  },
+  bgDecor: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  cloud: { position: 'absolute', backgroundColor: 'white', borderRadius: 99, opacity: 0.85 },
+  sun: {
+    position: 'absolute',
+    top: 32,
+    right: 24,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FFD740',
+    opacity: 0.8,
   },
   title: {
     fontSize: 30,
@@ -123,7 +140,7 @@ const styles = StyleSheet.create({
   },
   button: {
     width: '100%',
-    backgroundColor: '#4A90E2',
+    backgroundColor: '#FFA726',
     paddingVertical: 14,
     borderRadius: 12,
     alignItems: 'center',

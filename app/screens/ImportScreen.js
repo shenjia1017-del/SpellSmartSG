@@ -18,6 +18,7 @@ import {
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { extractTextFromPdfPage1Base64 } from '../../lib/pdfPage1Text';
 import { supabase } from '../../lib/supabase';
@@ -692,6 +693,12 @@ export default function ImportScreen() {
       style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
+      <LinearGradient colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']} style={styles.container}>
+        <View style={styles.bgDecor} pointerEvents="none">
+          <View style={[styles.cloud, { top: 38, left: 18, width: 80, height: 36 }]} />
+          <View style={[styles.cloud, { top: 28, left: 55, width: 60, height: 28 }]} />
+          <View style={styles.sun} />
+        </View>
       <ScrollView
         ref={scrollRef}
         style={styles.scroll}
@@ -930,15 +937,29 @@ export default function ImportScreen() {
         <Text style={styles.backText}>← Back</Text>
       </TouchableOpacity>
       </ScrollView>
+      </LinearGradient>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
+  container: { flex: 1 },
+  bgDecor: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  cloud: { position: 'absolute', backgroundColor: 'white', borderRadius: 99, opacity: 0.85 },
+  sun: {
+    position: 'absolute',
+    top: 32,
+    right: 24,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FFD740',
+    opacity: 0.8,
+  },
   scroll: {
     flex: 1,
     width: '100%',
-    backgroundColor: '#fff',
+    backgroundColor: 'transparent',
   },
   scrollContent: {
     alignItems: 'center',
@@ -951,7 +972,7 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
   button: {
-    backgroundColor: '#4A90E2',
+    backgroundColor: '#FFA726',
     paddingHorizontal: 40,
     paddingVertical: 15,
     borderRadius: 25,
@@ -960,7 +981,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   secondButton: {
-    backgroundColor: '#7ED321',
+    backgroundColor: '#66BB6A',
   },
   filesButton: {
     backgroundColor: '#F5A623',
@@ -1096,7 +1117,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   saveButton: {
-    backgroundColor: '#4A90E2',
+    backgroundColor: '#FFA726',
     paddingHorizontal: 20,
     paddingVertical: 14,
     borderRadius: 12,
@@ -1125,7 +1146,7 @@ const styles = StyleSheet.create({
   successStartBtn: {
     width: '100%',
     alignItems: 'center',
-    backgroundColor: '#7ED321',
+    backgroundColor: '#66BB6A',
     borderRadius: 12,
     paddingVertical: 14,
     paddingHorizontal: 16,

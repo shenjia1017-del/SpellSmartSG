@@ -105,3 +105,5 @@ export async function getCollection(userId) {
     creatures: creaturesRes.data || [],
   };
 }
+
+export default { updateWordMastery, completeWeek, getWeekMastery, getCollection };

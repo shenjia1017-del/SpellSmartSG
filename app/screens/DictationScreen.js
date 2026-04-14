@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import {
   fetchOpenAITtsAudio,
@@ -746,11 +747,17 @@ export default function DictationScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={64}
-    >
+    <LinearGradient colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']} style={styles.root}>
+      <View style={styles.bgDecor} pointerEvents="none">
+        <View style={[styles.cloud, { top: 38, left: 18, width: 80, height: 36 }]} />
+        <View style={[styles.cloud, { top: 28, left: 55, width: 60, height: 28 }]} />
+        <View style={styles.sun} />
+      </View>
+      <KeyboardAvoidingView
+        style={styles.kav}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={64}
+      >
       <ScrollView
         contentContainerStyle={styles.scrollInner}
         keyboardShouldPersistTaps="handled"
@@ -1110,15 +1117,21 @@ export default function DictationScreen() {
           </View>
         ) : null}
       </ScrollView>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#fff',
   },
+  kav: {
+    flex: 1,
+  },
+  bgDecor: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  cloud: { position: 'absolute', backgroundColor: 'white', borderRadius: 99, opacity: 0.85 },
+  sun: { position: 'absolute', top: 32, right: 24, width: 28, height: 28, borderRadius: 14, backgroundColor: '#FFD740', opacity: 0.8 },
   scrollInner: {
     padding: 20,
     paddingBottom: 40,
@@ -1152,7 +1165,7 @@ const styles = StyleSheet.create({
   },
   wordsPrevBtn: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.88)',
     borderWidth: 2,
     borderColor: BLUE,
     borderRadius: 14,
@@ -1437,7 +1450,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 14,
     marginTop: 4,
-    backgroundColor: '#fafafa',
+    backgroundColor: 'rgba(255,255,255,0.88)',
   },
   miniTag: {
     fontSize: 11,

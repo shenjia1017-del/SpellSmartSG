@@ -3,6 +3,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
+import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -907,7 +908,12 @@ export default function PracticeScreen() {
     });
 
   return (
-    <View style={styles.root}>
+    <LinearGradient colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']} style={styles.root}>
+      <View style={styles.bgDecor} pointerEvents="none">
+        <View style={[styles.cloud, { top: 38, left: 18, width: 80, height: 36 }]} />
+        <View style={[styles.cloud, { top: 28, left: 55, width: 60, height: 28 }]} />
+        <View style={styles.sun} />
+      </View>
       <View style={styles.headerBar}>
         <TouchableOpacity style={styles.headerBack} onPress={goBackLearn} hitSlop={12}>
           <Text style={styles.headerBackText}>← Back</Text>
@@ -1357,16 +1363,17 @@ export default function PracticeScreen() {
           </TouchableOpacity>
         </View>
       ) : null}
-    </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#fff',
-    paddingTop: 48,
   },
+  bgDecor: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  cloud: { position: 'absolute', backgroundColor: 'white', borderRadius: 99, opacity: 0.85 },
+  sun: { position: 'absolute', top: 32, right: 24, width: 28, height: 28, borderRadius: 14, backgroundColor: '#FFD740', opacity: 0.8 },
   centered: {
     justifyContent: 'center',
     alignItems: 'center',
@@ -1463,7 +1470,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 14,
     marginBottom: 20,
-    backgroundColor: '#fafafa',
+    backgroundColor: 'rgba(255,255,255,0.88)',
   },
   defEmpty: {
     color: GRAY,
@@ -1564,7 +1571,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 22,
     borderRadius: 12,
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.88)',
   },
   soundSkipBtnText: {
     color: GRAY,
@@ -1588,7 +1595,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 14,
     paddingHorizontal: 16,
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.88)',
   },
   fillOptionCorrect: {
     borderColor: '#2d7a16',
@@ -1630,7 +1637,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 8,
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.88)',
   },
   sylSlotFilled: {
     backgroundColor: '#E8F4FD',
@@ -1743,7 +1750,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   phBoxEmpty: {
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.88)',
   },
   phBoxFilled: {
     backgroundColor: '#E8F4FD',
@@ -1765,7 +1772,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.88)',
   },
   spellBoxFilled: {
     backgroundColor: '#E8F4FD',
@@ -1893,7 +1900,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.88)',
   },
   skipBtnText: {
     color: GRAY,

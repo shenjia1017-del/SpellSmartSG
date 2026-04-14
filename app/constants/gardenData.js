@@ -82,3 +82,5 @@ export function getCreatureIndexForFlowerCount(flowerCount) {
   if (flowerCount === 0 || flowerCount % 4 !== 0) return null;
   return (flowerCount / 4) - 1;
 }
+
+export default { FLOWERS, CREATURES, getFlowerForWeek, getCreatureIndexForFlowerCount };

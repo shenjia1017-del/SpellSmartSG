@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { ensurePhonemeClipsInStorage } from '../../lib/phonemeStorage';
 import { fetchOpenAITtsAudio, splitPhonicsToSyllables } from '../../lib/phonics';
@@ -802,7 +803,13 @@ export default function LearnScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <LinearGradient colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']} style={styles.container}>
+      <View style={styles.bgDecor} pointerEvents="none">
+        <View style={[styles.cloud, { top: 38, left: 18, width: 80, height: 36 }]} />
+        <View style={[styles.cloud, { top: 28, left: 55, width: 60, height: 28 }]} />
+        <View style={styles.sun} />
+      </View>
+      <SafeAreaView style={styles.safeContent}>
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -876,17 +883,32 @@ export default function LearnScreen() {
       <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
         <Text style={styles.backText}>← Back</Text>
       </TouchableOpacity>
-    </SafeAreaView>
+      </SafeAreaView>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+  },
+  safeContent: {
+    flex: 1,
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: 24,
+  },
+  bgDecor: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0
+  },
+  cloud: {
+    position: 'absolute', backgroundColor: 'white',
+    borderRadius: 99, opacity: 0.85
+  },
+  sun: {
+    position: 'absolute', top: 32, right: 24,
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: '#FFD740', opacity: 0.8
   },
   scroll: {
     flex: 1,
@@ -1011,7 +1033,7 @@ const styles = StyleSheet.create({
   },
   secondaryNavBtn: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: 'rgba(255,255,255,0.88)',
     borderWidth: 1.5,
     borderColor: '#4A90E2',
     borderRadius: 12,

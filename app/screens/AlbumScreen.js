@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, ActivityIndicator
+  View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { getCollection } from '../lib/gardenHelpers';
 import { CREATURES } from '../constants/gardenData';
@@ -12,6 +14,7 @@ export default function AlbumScreen() {
   const [flowers, setFlowers] = useState([]);
   const [creatures, setCreatures] = useState([]);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
   useEffect(() => { loadCollection(); }, []);
 
@@ -29,7 +32,14 @@ export default function AlbumScreen() {
   if (loading) return <ActivityIndicator style={{ flex: 1, marginTop: 60 }} />;
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <LinearGradient colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']} style={styles.container}>
+      <View style={styles.bgDecor} pointerEvents="none">
+        <View style={[styles.cloud, { top: 38, left: 18, width: 80, height: 36 }]} />
+        <View style={[styles.cloud, { top: 28, left: 55, width: 60, height: 28 }]} />
+        <View style={[styles.cloud, { top: 52, right: 30, width: 70, height: 30 }]} />
+        <View style={styles.sun} />
+      </View>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
 
       <Text style={styles.heading}>My album</Text>
       <Text style={styles.sub}>{creatures.length} / 50 creatures · {flowers.length} flowers</Text>
@@ -79,69 +89,52 @@ export default function AlbumScreen() {
       })}
 
       <View style={{ height: 40 }} />
-    </ScrollView>
+      </ScrollView>
+      <View style={styles.tabBar}>
+        <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/home')}>
+          <Text style={styles.tabIcon}>🏠</Text>
+          <Text style={styles.tabLabel}>Home</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/garden')}>
+          <Text style={styles.tabIcon}>🌸</Text>
+          <Text style={styles.tabLabel}>Garden</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.tabItem}>
+          <Text style={styles.tabIcon}>🏅</Text>
+          <Text style={[styles.tabLabel, styles.tabLabelActive]}>Album</Text>
+        </TouchableOpacity>
+      </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  content: { padding: 20 },
-  heading: { fontSize: 24, fontWeight: '700', color: '#1a1a1a' },
+  container: { flex: 1 },
+  scroll: { flex: 1 },
+  bgDecor: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+  cloud: { position: 'absolute', backgroundColor: 'white', borderRadius: 99, opacity: 0.85 },
+  sun: { position: 'absolute', top: 32, right: 24, width: 28, height: 28, borderRadius: 14, backgroundColor: '#FFD740', opacity: 0.8 },
+  content: { padding: 20, paddingTop: 60 },
+  heading: { fontSize: 24, fontWeight: '700', color: '#1A237E' },
   sub: { fontSize: 13, color: '#888', marginBottom: 10 },
-  progressBar: {
-    height: 7,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 99,
-    marginBottom: 24,
-    overflow: 'hidden',
-  },
-  progressFill: {
-    height: '100%',
-    backgroundColor: '#34c759',
-    borderRadius: 99,
-  },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#555',
-    marginBottom: 10,
-    marginTop: 20,
-  },
+  progressBar: { height: 7, backgroundColor: 'rgba(255,255,255,0.6)', borderRadius: 99, marginBottom: 24, overflow: 'hidden' },
+  progressFill: { height: '100%', backgroundColor: '#FFA726', borderRadius: 99 },
+  sectionTitle: { fontSize: 13, fontWeight: '600', color: '#546E7A', marginBottom: 10, marginTop: 20 },
   emptyText: { fontSize: 13, color: '#bbb', marginBottom: 16 },
-  flowerRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 8,
-  },
+  flowerRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
   flowerItem: { alignItems: 'center' },
   flowerEmoji: { fontSize: 24 },
   flowerLabel: { fontSize: 8, color: '#aaa', marginTop: 2, textAlign: 'center' },
-  catHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: 20,
-    marginBottom: 8,
-  },
+  catHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 20, marginBottom: 8 },
   catCount: { fontSize: 12, color: '#aaa' },
-  creatureGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  creatureCell: {
-    width: '17%',
-    aspectRatio: 1,
-    borderWidth: 0.5,
-    borderColor: '#e0e0e0',
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#fafafa',
-    padding: 4,
-  },
-  locked: { backgroundColor: '#f5f5f5' },
+  creatureGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  creatureCell: { width: '17%', aspectRatio: 1, borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.8)', borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.8)', padding: 4 },
+  locked: { backgroundColor: 'rgba(220,220,220,0.4)' },
   creatureEmoji: { fontSize: 20 },
   creatureName: { fontSize: 8, color: '#888', marginTop: 2, textAlign: 'center' },
+  tabBar: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.92)', borderTopWidth: 0.5, borderTopColor: '#E0E0E0', paddingBottom: 20, paddingTop: 8 },
+  tabItem: { flex: 1, alignItems: 'center' },
+  tabIcon: { fontSize: 20, marginBottom: 2 },
+  tabLabel: { fontSize: 10, color: '#B0BEC5', fontWeight: '500' },
+  tabLabelActive: { color: '#FFA726', fontWeight: '700' },
 });

@@ -1,19 +1,18 @@
-import * as Haptics from 'expo-haptics';
 import { useNavigation } from '@react-navigation/native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Haptics from 'expo-haptics';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   Vibration,
-  View,
+  View
 } from 'react-native';
 
 import {
@@ -26,6 +25,32 @@ import {
 } from '../../lib/phonics';
 import { supabase } from '../../lib/supabase';
 
+const REMEMBER_PRAISE_POOL = [
+  'Great job!', 'Well done!', 'You got it!', 'Nice work!',
+  'Perfect!', 'Awesome!', 'Super!', 'Fantastic!',
+  'Excellent!', 'Brilliant!', 'You rock!', 'Superb!',
+  'Amazing!', 'Wonderful!', 'Top work!', 'Way to go!',
+  'Marvellous!', 'Outstanding!', 'Keep it up!', 'Good memory!'
+];
+
+const FILLIN_PRAISE_POOL = [
+  'Correct!', "That's right!", 'Spot on!', 'Good choice!',
+  'You got it!', 'Nice pick!', 'Well chosen!', 'Smart pick!',
+  'Bang on!', 'Exactly!', 'Right on!', 'You nailed it!',
+  'Good thinking!', 'Clever!', 'Well spotted!', 'Sharp!',
+  'Nailed it!', 'You did it!', 'Brainy!', 'On the mark!'
+];
+
+const SPELLING_PRAISE_POOL = [
+  'Perfect spelling!', 'Spelled it!', 'You nailed it!', 'Champion!',
+  'Amazing!', "You're on fire!", 'Spelling star!', 'Super!',
+  'Letter perfect!', 'Wordsmith!', 'Every letter right!', 'Pro speller!',
+  'Bravo!', 'Spell master!', 'Flawless!', 'Top speller!',
+  'Incredible!', 'You did it!', 'Word wizard!', 'Spell-tacular!'
+];
+
+const getRandomPraise = (pool) => pool[Math.floor(Math.random() * pool.length)];
+
 const BLUE = '#F97316';
 const GRAY = '#999';
 const GRAY_LIGHT = '#e8e8e8';
@@ -34,6 +59,7 @@ const DARK_GRAY = '#444';
 const KBD_ROW_1 = 'qwertyuiop';
 const KBD_ROW_2 = 'asdfghjkl';
 const KBD_ROW_3 = 'zxcvbnm';
+const SPECIAL_CHARS = ["'", '-', '.', ':'];
 
 /** Fallback distractors when the user has fewer than 3 other words in Supabase. */
 const FILL_DISTRACTOR_FALLBACK = [
@@ -285,6 +311,10 @@ export default function PracticeScreen() {
   const [rememberTimerMs, setRememberTimerMs] = useState(5000);
   const [rememberIsCorrect, setRememberIsCorrect] = useState(false);
   const [rememberReveal, setRememberReveal] = useState('');
+  const [rememberPraise, setRememberPraise] = useState(null);
+  const [fillInPraise, setFillInPraise] = useState(null);
+  const [spellingPraise, setSpellingPraise] = useState(null);
+  const [showCompletionModal, setShowCompletionModal] = useState(false);
 
   /** Words in the practice phrase (space = boundary). */
   const practiceWordWords = useMemo(
@@ -770,20 +800,20 @@ export default function PracticeScreen() {
     () => String(practiceWord || '').replace(/ /g, '').toLowerCase().split(''),
     [practiceWord],
   );
+  const activeLetters = useMemo(
+    () => new Set(String(practiceWord || '').replace(/ /g, '').toLowerCase().split('')),
+    [practiceWord],
+  );
+  const specialKeysNeeded = useMemo(
+    () => SPECIAL_CHARS.filter((ch) => String(practiceWord || '').includes(ch)),
+    [practiceWord],
+  );
 
   const onSpellKey = async (char) => {
     if (spellingDone) return;
-    if (char === ' ') {
-      playKeyboardClick();
-      return;
-    }
     const idx = spellSlots.findIndex((s) => s == null);
     if (idx === -1) return;
-    const inv = { ...spellInventory };
-    if (!inv[char]) return;
     playKeyboardClick();
-    inv[char] -= 1;
-    setSpellInventory(inv);
     setSpellSlots((s) => {
       const n = [...s];
       n[idx] = char;
@@ -802,10 +832,6 @@ export default function PracticeScreen() {
     }
     if (last < 0) return;
     playKeyboardClick();
-    const ch = spellSlots[last];
-    const inv = { ...spellInventory };
-    inv[ch] = (inv[ch] || 0) + 1;
-    setSpellInventory(inv);
     setSpellSlots((s) => {
       const n = [...s];
       n[last] = null;
@@ -848,12 +874,21 @@ export default function PracticeScreen() {
       playSuccessSound();
       runGreenFlash(spFlash, () => {});
       setSpellingDone(true);
+      setSpellingPraise(getRandomPraise(SPELLING_PRAISE_POOL));
       if (spellingAdvanceTimerRef.current) clearTimeout(spellingAdvanceTimerRef.current);
       spellingAdvanceTimerRef.current = setTimeout(() => {
         spellingAdvanceTimerRef.current = null;
-        goLearnNextWord();
+        if (isLastPracticeWord) {
+          setShowCompletionModal(true);
+        } else {
+          goLearnNextWord();
+        }
       }, 1400);
     } else {
+      if (isLastPracticeWord) {
+        setShowCompletionModal(true);
+        return;
+      }
       runShake(spShake);
       resetSpelling();
     }
@@ -868,6 +903,7 @@ export default function PracticeScreen() {
     const ok = String(choice).toLowerCase() === practiceWord.toLowerCase();
     if (ok) {
       setFillInCorrect(true);
+      setFillInPraise(getRandomPraise(FILLIN_PRAISE_POOL));
       if (fillAdvanceTimerRef.current) clearTimeout(fillAdvanceTimerRef.current);
       fillAdvanceTimerRef.current = setTimeout(() => {
         fillAdvanceTimerRef.current = null;
@@ -897,7 +933,6 @@ export default function PracticeScreen() {
 
   const onRememberKey = (char) => {
     if (lcwcStage !== 'write') return;
-    if (char === ' ') return;
     const idx = rememberSlots.findIndex((s) => s == null);
     if (idx === -1) return;
     setRememberSlots((prev) => {
@@ -932,9 +967,12 @@ export default function PracticeScreen() {
     setLcwcStage('check');
     setRememberIsCorrect(ok);
     if (ok) {
-      setRememberReveal('✓ Well done! You got it right!');
+      const praise = getRandomPraise(REMEMBER_PRAISE_POOL);
+      setRememberPraise(praise);
+      setRememberReveal(`✓ ${praise}`);
     } else {
-      setRememberReveal(`✗ The correct spelling is: ${String(practiceWord || '').toUpperCase()}`);
+      setRememberPraise(null);
+      setRememberReveal('');
     }
   };
 
@@ -944,7 +982,11 @@ export default function PracticeScreen() {
     } else if (tab === 'fill') {
       setTab('spelling');
     } else {
-      goLearnNextWord();
+      if (isLastPracticeWord) {
+        setShowCompletionModal(true);
+      } else {
+        goLearnNextWord();
+      }
     }
   };
 
@@ -957,6 +999,18 @@ export default function PracticeScreen() {
     phGroup1.length === 0 &&
     phAnswers.every((box, i) => (i === phSpaceIndexRef.current ? true : box != null));
   const canCheckSp = !spellSlots.some((x) => x == null) && practiceWord.length > 0;
+  const wordsJSONRaw = paramStr(params, 'wordsJSON');
+  const learnIndex = Number(paramStr(params, 'learnIndex')) || 0;
+  const isLastPracticeWord = useMemo(() => {
+    if (!wordsJSONRaw.trim()) return false;
+    try {
+      const parsed = JSON.parse(wordsJSONRaw);
+      if (!Array.isArray(parsed) || parsed.length === 0) return false;
+      return learnIndex >= parsed.length - 1;
+    } catch {
+      return false;
+    }
+  }, [wordsJSONRaw, learnIndex]);
 
   const showCheckButton =
     !spellingDone && tab === 'spelling';
@@ -993,6 +1047,13 @@ export default function PracticeScreen() {
     if (tab !== 'remember' || lcwcStage !== 'look') return;
     void playTts(practiceWord);
   }, [tab, lcwcStage, practiceWord]);
+
+  useEffect(() => {
+    setRememberPraise(null);
+    setFillInPraise(null);
+    setSpellingPraise(null);
+    setShowCompletionModal(false);
+  }, [practiceWord]);
 
   if (!practiceWord) {
     return (
@@ -1194,6 +1255,16 @@ export default function PracticeScreen() {
                     </TouchableOpacity>
                   </View>
                   <View style={styles.spaceRow}>
+                    {specialKeysNeeded.map((specialChar) => (
+                      <TouchableOpacity
+                        key={`rm-special-${specialChar}`}
+                        style={[styles.kbdKey, styles.kbdKeyOn]}
+                        onPress={() => onRememberKey(specialChar)}
+                        activeOpacity={0.65}
+                      >
+                        <Text style={[styles.kbdKeyText, styles.kbdKeyTextOn]}>{specialChar}</Text>
+                      </TouchableOpacity>
+                    ))}
                     <TouchableOpacity
                       style={[styles.kbdKey, styles.spaceKey]}
                       onPress={() => onRememberKey(' ')}
@@ -1216,17 +1287,18 @@ export default function PracticeScreen() {
 
             {lcwcStage === 'check' ? (
               <View style={styles.rememberFeedbackBox}>
-                <Text style={[styles.rememberFeedbackText, rememberIsCorrect ? styles.rememberOk : styles.rememberBad]}>
-                  {rememberReveal}
-                </Text>
+                {rememberIsCorrect && rememberPraise ? (
+                  <Text style={[styles.rememberFeedbackText, styles.rememberOk]}>
+                    {rememberReveal}
+                  </Text>
+                ) : null}
                 <TouchableOpacity
                   style={styles.soundNextBtn}
                   onPress={() => {
-                    resetRememberFlow();
-                    goLearnNextWord();
+                    setTab('fill');
                   }}
                 >
-                  <Text style={styles.soundNextBtnText}>Next word →</Text>
+                  <Text style={styles.soundNextBtnText}>Continue to Fill In →</Text>
                 </TouchableOpacity>
               </View>
             ) : null}
@@ -1267,7 +1339,7 @@ export default function PracticeScreen() {
               </Animated.View>
             )}
             {fillInCorrect ? (
-              <Text style={styles.fillCorrectText}>Correct!</Text>
+              <Text style={styles.fillCorrectText}>{fillInPraise || 'Correct!'}</Text>
             ) : null}
           </View>
         ) : null}
@@ -1300,18 +1372,23 @@ export default function PracticeScreen() {
               <View style={styles.kbdRow}>
                 {KBD_ROW_1.split('').map((keyChar) => {
                   const c = keyChar.toLowerCase();
-                  const enabled = (spellInventory[c] || 0) > 0 && !spellingDone;
+                  const enabled = activeLetters.has(c) && !spellingDone;
                   return (
                     <TouchableOpacity
                       key={`r1-${keyChar}`}
-                      style={[styles.kbdKey, enabled ? styles.kbdKeyOn : styles.kbdKeyOff]}
+                      style={[styles.kbdKey, enabled ? styles.kbdKeySpellingOn : styles.kbdKeySpellingOff]}
                       onPress={() => {
                         void onSpellKey(c);
                       }}
                       disabled={!enabled}
                       activeOpacity={0.65}
                     >
-                      <Text style={[styles.kbdKeyText, enabled ? styles.kbdKeyTextOn : styles.kbdKeyTextOff]}>
+                      <Text
+                        style={[
+                          styles.kbdKeyText,
+                          enabled ? styles.kbdKeyTextSpellingOn : styles.kbdKeyTextSpellingOff,
+                        ]}
+                      >
                         {keyChar.toLowerCase()}
                       </Text>
                     </TouchableOpacity>
@@ -1321,18 +1398,23 @@ export default function PracticeScreen() {
               <View style={styles.kbdRow}>
                 {KBD_ROW_2.split('').map((keyChar) => {
                   const c = keyChar.toLowerCase();
-                  const enabled = (spellInventory[c] || 0) > 0 && !spellingDone;
+                  const enabled = activeLetters.has(c) && !spellingDone;
                   return (
                     <TouchableOpacity
                       key={`r2-${keyChar}`}
-                      style={[styles.kbdKey, enabled ? styles.kbdKeyOn : styles.kbdKeyOff]}
+                      style={[styles.kbdKey, enabled ? styles.kbdKeySpellingOn : styles.kbdKeySpellingOff]}
                       onPress={() => {
                         void onSpellKey(c);
                       }}
                       disabled={!enabled}
                       activeOpacity={0.65}
                     >
-                      <Text style={[styles.kbdKeyText, enabled ? styles.kbdKeyTextOn : styles.kbdKeyTextOff]}>
+                      <Text
+                        style={[
+                          styles.kbdKeyText,
+                          enabled ? styles.kbdKeyTextSpellingOn : styles.kbdKeyTextSpellingOff,
+                        ]}
+                      >
                         {keyChar.toLowerCase()}
                       </Text>
                     </TouchableOpacity>
@@ -1342,18 +1424,23 @@ export default function PracticeScreen() {
               <View style={[styles.kbdRow, styles.kbdRowLast]}>
                 {KBD_ROW_3.split('').map((keyChar) => {
                   const c = keyChar.toLowerCase();
-                  const enabled = (spellInventory[c] || 0) > 0 && !spellingDone;
+                  const enabled = activeLetters.has(c) && !spellingDone;
                   return (
                     <TouchableOpacity
                       key={`r3-${keyChar}`}
-                      style={[styles.kbdKey, enabled ? styles.kbdKeyOn : styles.kbdKeyOff]}
+                      style={[styles.kbdKey, enabled ? styles.kbdKeySpellingOn : styles.kbdKeySpellingOff]}
                       onPress={() => {
                         void onSpellKey(c);
                       }}
                       disabled={!enabled}
                       activeOpacity={0.65}
                     >
-                      <Text style={[styles.kbdKeyText, enabled ? styles.kbdKeyTextOn : styles.kbdKeyTextOff]}>
+                      <Text
+                        style={[
+                          styles.kbdKeyText,
+                          enabled ? styles.kbdKeyTextSpellingOn : styles.kbdKeyTextSpellingOff,
+                        ]}
+                      >
                         {keyChar.toLowerCase()}
                       </Text>
                     </TouchableOpacity>
@@ -1371,12 +1458,23 @@ export default function PracticeScreen() {
                 </TouchableOpacity>
               </View>
               <View style={styles.spaceRow}>
+                {specialKeysNeeded.map((specialChar) => (
+                  <TouchableOpacity
+                    key={`sp-special-${specialChar}`}
+                    style={[styles.kbdKey, styles.kbdKeySpellingOn]}
+                    onPress={() => {
+                      void onSpellKey(specialChar);
+                    }}
+                    activeOpacity={0.65}
+                  >
+                    <Text style={[styles.kbdKeyText, styles.kbdKeyTextSpellingOn]}>{specialChar}</Text>
+                  </TouchableOpacity>
+                ))}
                 <TouchableOpacity
                   style={[styles.kbdKey, styles.spaceKey]}
                   onPress={() => {
                     void onSpellKey(' ');
                   }}
-                  disabled={spellingDone}
                   activeOpacity={0.65}
                 >
                   <Text style={styles.spaceKeyText}>SPACE</Text>
@@ -1386,7 +1484,7 @@ export default function PracticeScreen() {
 
             {spellingDone ? (
               <View style={styles.doneBox}>
-                <Text style={styles.doneText}>Well done! 🎉</Text>
+                <Text style={styles.doneText}>{spellingPraise || 'Perfect spelling!'}</Text>
                 <Text style={styles.doneSub}>Loading next word…</Text>
               </View>
             ) : null}
@@ -1414,6 +1512,32 @@ export default function PracticeScreen() {
           <TouchableOpacity style={styles.skipBtn} onPress={onFooterSkip}>
             <Text style={styles.skipBtnText}>I&apos;m not sure — Skip</Text>
           </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {showCompletionModal ? (
+        <View style={styles.completionOverlay}>
+          <View style={styles.completionCard}>
+            <Text style={styles.completionTitle}>🎉 All words practiced!</Text>
+            <Text style={styles.completionSubtitle}>
+              You&apos;ve finished Remember, Fill In and Spelling for all your words this week.
+            </Text>
+            <Text style={styles.completionQuestion}>Ready for the Dictation Test?</Text>
+
+            <TouchableOpacity
+              style={styles.completionPrimaryBtn}
+              onPress={() => router.push('/screens/DictationScreen')}
+            >
+              <Text style={styles.completionPrimaryBtnText}>Yes, start Dictation Test →</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.completionSecondaryBtn}
+              onPress={() => router.push('/')}
+            >
+              <Text style={styles.completionSecondaryBtnText}>Not yet — back to Home</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       ) : null}
     </View>
@@ -2000,6 +2124,22 @@ const styles = StyleSheet.create({
   kbdKeyTextOff: {
     color: '#000',
   },
+  kbdKeySpellingOn: {
+    backgroundColor: '#fcfcfe',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#F97316',
+  },
+  kbdKeySpellingOff: {
+    backgroundColor: '#E8E8E8',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#cfcfcf',
+  },
+  kbdKeyTextSpellingOn: {
+    color: '#3d1f00',
+  },
+  kbdKeyTextSpellingOff: {
+    color: '#AAAAAA',
+  },
   kbdBackspace: {
     minWidth: 52,
     width: 52,
@@ -2099,5 +2239,71 @@ const styles = StyleSheet.create({
     color: '#999',
     fontSize: 15,
     fontWeight: '700',
+  },
+  completionOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  completionCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: '#FFF8F0',
+    borderRadius: 16,
+    padding: 20,
+    borderWidth: 1,
+    borderColor: '#F0E8DC',
+  },
+  completionTitle: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: '#E65100',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  completionSubtitle: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: '#444',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  completionQuestion: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#F97316',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  completionPrimaryBtn: {
+    backgroundColor: '#F97316',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  completionPrimaryBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  completionSecondaryBtn: {
+    borderWidth: 2,
+    borderColor: '#F97316',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  completionSecondaryBtnText: {
+    color: '#F97316',
+    fontSize: 15,
+    fontWeight: '800',
   },
 });

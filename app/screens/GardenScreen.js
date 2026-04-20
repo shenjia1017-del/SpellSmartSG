@@ -179,10 +179,6 @@ export default function GardenScreen() {
           <Text style={styles.tabIcon}>🏠</Text>
           <Text style={styles.tabLabel}>Home</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.tabItem}>
-          <Text style={styles.tabIcon}>🌸</Text>
-          <Text style={[styles.tabLabel, styles.tabLabelActive]}>Garden</Text>
-        </TouchableOpacity>
         <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/album')}>
           <Text style={styles.tabIcon}>🏅</Text>
           <Text style={styles.tabLabel}>Album</Text>

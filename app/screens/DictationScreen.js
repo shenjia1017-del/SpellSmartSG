@@ -14,17 +14,16 @@ import {
 } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
-import { LinearGradient } from 'expo-linear-gradient';
-
 import {
   fetchOpenAITtsAudio,
   TTS_LANGUAGE,
   TTS_VOICE_WORD,
 } from '../../lib/phonics';
 import { supabase } from '../../lib/supabase';
-import { updateWordMastery } from '../lib/gardenHelpers';
+import { completeWeek, updateWordMastery } from '../lib/gardenHelpers';
+import WeekCompleteModal from '../components/WeekCompleteModal';
 
-const BLUE = '#378ADD';
+const BLUE = '#F97316';
 const GREEN_PHRASE = '#2e7d32';
 const TTS_MIN_MS = 800;
 /** Words & phrases dictation — slower than default. */
@@ -323,6 +322,10 @@ export default function DictationScreen() {
   const [wrongWords, setWrongWords] = useState([]);
   /** Sentences (type in app): full expected text for each wrong sentence (for redo subset). */
   const [wrongSentences, setWrongSentences] = useState([]);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [modalFlower, setModalFlower] = useState(null);
+  const [modalCreature, setModalCreature] = useState(null);
+  const [modalTotalFlowers, setModalTotalFlowers] = useState(0);
   /** Sentence flows: Next allowed only after playback + 3s countdown. */
   const [sentenceNextReady, setSentenceNextReady] = useState(false);
   /** 3 | 2 | 1 while counting down, null when idle / done. */
@@ -404,7 +407,6 @@ export default function DictationScreen() {
   useLayoutEffect(() => {
     let title = 'Dictation';
     if (phase === 'modeSelect') title = 'Dictation';
-    else if (phase === 'sentenceModeSelect') title = 'Sentences';
     else if (phase === 'wordsActive') title = 'Words & Phrases';
     else if (phase === 'sentencesTypeActive') title = 'Sentences';
     else if (phase === 'sentencesPaperActive') title = 'Write on paper';
@@ -607,6 +609,27 @@ export default function DictationScreen() {
       const isLast = idx + 1 >= queue.length;
       setResultsRows((prev) => [...prev, row]);
       if (isLast) {
+        const rawW = params.weekLabel;
+        const weekFromParams =
+          rawW == null ? '' : Array.isArray(rawW) ? String(rawW[0] ?? '') : String(rawW);
+        const weekLabel =
+          String(weekLabelForQuery || weekFromParams || '').trim() ||
+          String(
+            words.find((w) => typeof w === 'object' && w?.week_label)?.week_label ?? '',
+          ).trim();
+        const nextResults = [...resultsRows, row];
+        if (user) {
+          const allCorrect = nextResults.every((r) => r.correct === true);
+          if (allCorrect && nextResults.length > 0 && weekLabel) {
+            const reward = await completeWeek(user.id, weekLabel);
+            if (reward) {
+              setModalFlower(reward.flower);
+              setModalCreature(reward.newCreature);
+              setModalTotalFlowers(reward.totalFlowers);
+              setModalVisible(true);
+            }
+          }
+        }
         setPhase('results');
       } else {
         setIdx((i) => i + 1);
@@ -763,25 +786,30 @@ export default function DictationScreen() {
   };
 
   return (
-    <LinearGradient colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']} style={styles.root}>
-      <View style={styles.bgDecor} pointerEvents="none">
-        <View style={[styles.cloud, { top: 38, left: 18, width: 80, height: 36 }]} />
-        <View style={[styles.cloud, { top: 28, left: 55, width: 60, height: 28 }]} />
-        <View style={styles.sun} />
+    <View style={styles.container}>
+      <View style={styles.pageHeader}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <Text style={styles.backBtnText}>←</Text>
+        </TouchableOpacity>
+        <View>
+          <Text style={styles.pageTitle}>Dictation Test</Text>
+          <Text style={styles.pageSubtitle}>Choose a practice mode</Text>
+        </View>
       </View>
+
       <KeyboardAvoidingView
         style={styles.kav}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={64}
       >
-      <ScrollView
-        contentContainerStyle={styles.scrollInner}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
+        <ScrollView
+          style={styles.scrollArea}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 40 }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
         {phase === 'modeSelect' ? (
           <View style={styles.block}>
-            <Text style={styles.lead}>Choose how you want to practise dictation.</Text>
             {weekDataLoading ? (
               <View style={styles.loadingBlock}>
                 <ActivityIndicator color={BLUE} />
@@ -791,23 +819,53 @@ export default function DictationScreen() {
               <>
                 {weekDataError ? <Text style={styles.warn}>{weekDataError}</Text> : null}
                 <TouchableOpacity
-                  style={[styles.primaryBtn, !hasWordPhraseContent && styles.btnDisabled]}
+                  style={[styles.dictCardPrimary, !hasWordPhraseContent && styles.btnDisabled]}
                   onPress={startWordsFlow}
                   disabled={!hasWordPhraseContent}
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.primaryBtnText}>Words & Phrases</Text>
-                  <Text style={styles.subtitle}>From your spelling list only, random order</Text>
+                  <View style={styles.dictCardTop}>
+                    <Text style={styles.dictIcon}>📝</Text>
+                    <Text style={styles.dictTitlePrimary}>Words & Phrases</Text>
+                    <View style={styles.dictBadge}>
+                      <Text style={styles.dictBadgeText}>POPULAR</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.dictSubPrimary}>
+                    From your spelling list · random order · auto-graded
+                  </Text>
                 </TouchableOpacity>
+
                 <TouchableOpacity
-                  style={[styles.primaryBtn, !hasSentenceContent && styles.btnDisabled]}
-                  onPress={() => setPhase('sentenceModeSelect')}
+                  style={[styles.dictCard, !hasSentenceContent && styles.btnDisabled]}
+                  onPress={startSentencesTypeFlow}
                   disabled={!hasSentenceContent}
                   activeOpacity={0.85}
                 >
-                  <Text style={styles.primaryBtnText}>Sentences</Text>
-                  <Text style={styles.subtitle}>From your saved passages only</Text>
+                  <View style={styles.dictCardTop}>
+                    <Text style={styles.dictIcon}>⌨️</Text>
+                    <Text style={styles.dictTitle}>Sentences (Typing)</Text>
+                  </View>
+                  <Text style={styles.dictSub}>
+                    Hear a sentence · type your answer · auto-graded
+                  </Text>
                 </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.dictCard, !hasSentenceContent && styles.btnDisabled]}
+                  onPress={startSentencesPaperFlow}
+                  disabled={!hasSentenceContent}
+                  activeOpacity={0.85}
+                >
+                  <View style={styles.dictCardTop}>
+                    <Text style={styles.dictIcon}>✏️</Text>
+                    <Text style={styles.dictTitle}>Sentences (Paper)</Text>
+                  </View>
+                  <Text style={styles.dictSub}>
+                    Hear the sentence · write on paper · check answers after
+                  </Text>
+                </TouchableOpacity>
+
                 {!weekDataError && !hasWordPhraseContent && !hasSentenceContent ? (
                   <Text style={styles.warn}>
                     No words or passages for this week. Add a list and/or passage from Import first.
@@ -815,34 +873,6 @@ export default function DictationScreen() {
                 ) : null}
               </>
             )}
-            <TouchableOpacity style={styles.textLink} onPress={() => router.back()}>
-              <Text style={styles.textLinkLabel}>← Back</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-
-        {phase === 'sentenceModeSelect' ? (
-          <View style={styles.block}>
-            <Text style={styles.lead}>How do you want to answer?</Text>
-            <TouchableOpacity
-              style={styles.primaryBtn}
-              onPress={startSentencesTypeFlow}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.primaryBtnText}>Type on screen</Text>
-              <Text style={styles.subtitle}>SpellSmart marks your answers</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.primaryBtn}
-              onPress={startSentencesPaperFlow}
-              activeOpacity={0.85}
-            >
-              <Text style={styles.primaryBtnText}>Write on paper</Text>
-              <Text style={styles.subtitle}>SpellSmart shows answers at the end</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.textLink} onPress={() => router.back()}>
-              <Text style={styles.textLinkLabel}>← Back</Text>
-            </TouchableOpacity>
           </View>
         ) : null}
 
@@ -1134,23 +1164,113 @@ export default function DictationScreen() {
         ) : null}
       </ScrollView>
       </KeyboardAvoidingView>
-    </LinearGradient>
+
+      <View style={styles.tabBar}>
+        <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/')}>
+          <Text style={styles.tabIcon}>🏠</Text>
+          <Text style={styles.tabLabel}>Home</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/album')}>
+          <Text style={styles.tabIcon}>🏅</Text>
+          <Text style={styles.tabLabel}>Album</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/history')}>
+          <Text style={styles.tabIcon}>📊</Text>
+          <Text style={styles.tabLabel}>History</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/settings')}>
+          <Text style={styles.tabIcon}>⚙️</Text>
+          <Text style={styles.tabLabel}>Settings</Text>
+        </TouchableOpacity>
+      </View>
+
+      <WeekCompleteModal
+        visible={modalVisible}
+        flower={modalFlower}
+        newCreature={modalCreature}
+        totalFlowers={modalTotalFlowers}
+        onViewAlbum={() => {
+          setModalVisible(false);
+          router.push('/album');
+        }}
+        onClose={() => setModalVisible(false)}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
+  container: { flex: 1, backgroundColor: '#FFF8F0' },
+  pageHeader: {
+    backgroundColor: '#FFF8F0',
+    paddingHorizontal: 16,
+    paddingTop: 56,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0E8DC',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'white',
+    borderWidth: 1.5,
+    borderColor: '#F0E8DC',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backBtnText: { fontSize: 18, color: '#F97316', fontWeight: '700' },
+  pageTitle: { fontSize: 16, fontWeight: '800', color: '#1A1A1A' },
+  pageSubtitle: { fontSize: 10, color: '#999', marginTop: 1 },
+  scrollArea: { flex: 1 },
+  scrollContent: { padding: 14, gap: 8 },
+  dictCardPrimary: {
+    backgroundColor: '#F97316',
+    borderRadius: 14,
+    padding: 14,
+    shadowColor: '#F97316',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  dictCard: {
+    backgroundColor: 'white',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#F0E8DC',
+    padding: 14,
+  },
+  dictCardTop: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 },
+  dictIcon: { fontSize: 22 },
+  dictTitlePrimary: { fontSize: 15, fontWeight: '800', color: 'white', flex: 1 },
+  dictTitle: { fontSize: 15, fontWeight: '700', color: '#1A1A1A', flex: 1 },
+  dictSubPrimary: { fontSize: 10, color: 'rgba(255,255,255,0.75)', paddingLeft: 32 },
+  dictSub: { fontSize: 10, color: '#999', paddingLeft: 32 },
+  dictBadge: {
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    borderRadius: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  dictBadgeText: { fontSize: 8, fontWeight: '800', color: 'white', letterSpacing: 0.5 },
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: 'white',
+    borderTopWidth: 0.5,
+    borderTopColor: '#F0EAE0',
+    paddingBottom: 20,
+    paddingTop: 8,
+  },
+  tabItem: { flex: 1, alignItems: 'center' },
+  tabIcon: { fontSize: 20, marginBottom: 2 },
+  tabLabel: { fontSize: 9, color: '#B0BEC5', fontWeight: '600' },
+
   kav: {
     flex: 1,
-  },
-  bgDecor: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  cloud: { position: 'absolute', backgroundColor: 'white', borderRadius: 99, opacity: 0.85 },
-  sun: { position: 'absolute', top: 32, right: 24, width: 28, height: 28, borderRadius: 14, backgroundColor: '#FFD740', opacity: 0.8 },
-  scrollInner: {
-    padding: 20,
-    paddingBottom: 40,
   },
   block: {
     gap: 16,
@@ -1159,12 +1279,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     paddingVertical: 24,
-  },
-  lead: {
-    fontSize: 17,
-    color: '#333',
-    marginBottom: 8,
-    lineHeight: 24,
   },
   primaryBtn: {
     backgroundColor: BLUE,

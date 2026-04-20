@@ -12,8 +12,6 @@ import {
 } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
-import { LinearGradient } from 'expo-linear-gradient';
-
 import { ensurePhonemeClipsInStorage } from '../../lib/phonemeStorage';
 import { fetchOpenAITtsAudio, splitPhonicsToSyllables } from '../../lib/phonics';
 import { supabase } from '../../lib/supabase';
@@ -773,7 +771,7 @@ export default function LearnScreen() {
   if (loadingList) {
     return (
       <SafeAreaView style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" color="#4A90E2" />
+        <ActivityIndicator size="large" color="#F97316" />
         <Text style={styles.muted}>Loading your words…</Text>
       </SafeAreaView>
     );
@@ -803,177 +801,238 @@ export default function LearnScreen() {
   }
 
   return (
-    <LinearGradient colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']} style={styles.container}>
-      <View style={styles.bgDecor} pointerEvents="none">
-        <View style={[styles.cloud, { top: 38, left: 18, width: 80, height: 36 }]} />
-        <View style={[styles.cloud, { top: 28, left: 55, width: 60, height: 28 }]} />
-        <View style={styles.sun} />
-      </View>
-      <SafeAreaView style={styles.safeContent}>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        <Text style={styles.wordTitle} numberOfLines={4}>
-          {currentWord}
-        </Text>
-
-        <Text style={styles.emoji}>{card.emoji}</Text>
-
-        <TouchableOpacity
-          style={[styles.button, playing && styles.buttonDisabled]}
-          onPress={onPlayPronunciation}
-          disabled={playing || loadingCard}
-        >
-          {playing ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Pronunciation</Text>
-          )}
-        </TouchableOpacity>
-
-        {loadingCard ? (
-          <View style={styles.loadingCard}>
-            <ActivityIndicator color="#4A90E2" />
-            <Text style={styles.muted}>Loading definition and example…</Text>
+    <View style={styles.container}>
+      <SafeAreaView style={styles.safeAreaFill}>
+        <View style={styles.pageHeader}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <Text style={styles.backBtnText}>←</Text>
+          </TouchableOpacity>
+          <View style={styles.headerCenter}>
+            <Text style={styles.pageTitle}>Learn</Text>
+            <Text style={styles.pageSubtitle}>
+              {index + 1} / {words.length} words
+            </Text>
           </View>
-        ) : (
-          <>
-            <Text style={styles.sectionLabel}>Definition</Text>
-            <Text style={styles.definition}>{card.definition}</Text>
+          <View style={styles.progressPill}>
+            <Text style={styles.progressPillText}>
+              {index + 1}/{words.length}
+            </Text>
+          </View>
+        </View>
 
-            <Text style={styles.sectionLabel}>Example</Text>
-            <Text style={styles.example}>{card.example}</Text>
-          </>
-        )}
-
-        {errorMsg ? <Text style={styles.errorBanner}>{errorMsg}</Text> : null}
-
-        <TouchableOpacity
-          style={[styles.practiceNavBtn, (!card.practiceWord || loadingCard) && styles.practiceNavBtnDisabled]}
-          onPress={goPractice}
-          disabled={!card.practiceWord || loadingCard}
+        <ScrollView
+          style={styles.scrollArea}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
-          <Text style={styles.practiceNavBtnText}>Practice this word →</Text>
-        </TouchableOpacity>
-      </ScrollView>
+          <View style={styles.wordHero}>
+            <Text style={styles.wordEmoji}>{card?.emoji || '📖'}</Text>
+            <Text style={styles.wordBig}>{String(currentWord ?? '').toUpperCase()}</Text>
+            <TouchableOpacity
+              style={styles.pronunciationBtn}
+              onPress={onPlayPronunciation}
+              disabled={playing || loadingCard}
+            >
+              {playing ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.pronunciationBtnText}>🔊  Pronunciation</Text>
+              )}
+            </TouchableOpacity>
+          </View>
 
-      <Text style={styles.bottomCounter}>
-        {index + 1} / {words.length}
-      </Text>
-      <View style={styles.bottomNavRow}>
-        <TouchableOpacity
-          style={[styles.secondaryNavBtn, index === 0 && styles.secondaryNavBtnDisabled]}
-          onPress={goPrev}
-          disabled={index === 0}
-        >
-          <Text style={styles.secondaryNavBtnText}>← Previous</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.secondaryNavBtn, index >= words.length - 1 && styles.secondaryNavBtnDisabled]}
-          onPress={goNext}
-          disabled={index >= words.length - 1}
-        >
-          <Text style={styles.secondaryNavBtnText}>Next →</Text>
-        </TouchableOpacity>
-      </View>
+          {loadingCard ? (
+            <View style={styles.loadingCard}>
+              <ActivityIndicator color="#F97316" />
+              <Text style={styles.muted}>Loading definition and example…</Text>
+            </View>
+          ) : null}
 
-      <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-        <Text style={styles.backText}>← Back</Text>
-      </TouchableOpacity>
+          {card?.definition ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>DEFINITION</Text>
+              <Text style={styles.sectionText}>{card.definition}</Text>
+            </View>
+          ) : null}
+
+          {card?.example ? (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>EXAMPLE</Text>
+              <Text style={styles.sectionItalic}>{card.example}</Text>
+            </View>
+          ) : null}
+
+          {errorMsg ? <Text style={styles.errorBanner}>{errorMsg}</Text> : null}
+
+          <TouchableOpacity
+            style={[styles.practiceBtn, (!card.practiceWord || loadingCard) && styles.practiceBtnDisabled]}
+            onPress={goPractice}
+            disabled={!card.practiceWord || loadingCard}
+          >
+            <Text style={styles.practiceBtnText}>Practice this word →</Text>
+          </TouchableOpacity>
+        </ScrollView>
+
+        <View style={styles.bottomNav}>
+          <TouchableOpacity
+            style={[styles.navBtn, index === 0 && styles.navBtnDisabled]}
+            onPress={goPrev}
+            disabled={index === 0}
+          >
+            <Text style={[styles.navBtnText, index === 0 && styles.navBtnTextDisabled]}>← Previous</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.navBtnPrimary, index === words.length - 1 && styles.navBtnDisabled]}
+            onPress={goNext}
+            disabled={index === words.length - 1}
+          >
+            <Text style={styles.navBtnPrimaryText}>Next →</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.tabBar}>
+          <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/')}>
+            <Text style={styles.tabIcon}>🏠</Text>
+            <Text style={styles.tabLabel}>Home</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/album')}>
+            <Text style={styles.tabIcon}>🏅</Text>
+            <Text style={styles.tabLabel}>Album</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/history')}>
+            <Text style={styles.tabIcon}>📊</Text>
+            <Text style={styles.tabLabel}>History</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/settings')}>
+            <Text style={styles.tabIcon}>⚙️</Text>
+            <Text style={styles.tabLabel}>Settings</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
+  container: { flex: 1, backgroundColor: '#FFF8F0' },
+  safeAreaFill: { flex: 1 },
+  pageHeader: {
+    backgroundColor: '#FFF8F0',
+    paddingHorizontal: 16,
+    paddingTop: 56,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0E8DC',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
   },
-  safeContent: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 24,
-  },
-  bgDecor: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0
-  },
-  cloud: {
-    position: 'absolute', backgroundColor: 'white',
-    borderRadius: 99, opacity: 0.85
-  },
-  sun: {
-    position: 'absolute', top: 32, right: 24,
-    width: 28, height: 28, borderRadius: 14,
-    backgroundColor: '#FFD740', opacity: 0.8
-  },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 24,
-  },
-  centered: {
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'white',
+    borderWidth: 1.5,
+    borderColor: '#F0E8DC',
+    alignItems: 'center',
     justifyContent: 'center',
+  },
+  backBtnText: { fontSize: 18, color: '#F97316', fontWeight: '700' },
+  headerCenter: { flex: 1 },
+  pageTitle: { fontSize: 16, fontWeight: '800', color: '#1A1A1A' },
+  pageSubtitle: { fontSize: 10, color: '#999', marginTop: 1 },
+  progressPill: {
+    backgroundColor: '#FFF3E0',
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: '#F0E8DC',
+  },
+  progressPillText: { fontSize: 11, fontWeight: '700', color: '#F97316' },
+  scrollArea: { flex: 1 },
+  scrollContent: { paddingBottom: 20 },
+  wordHero: {
+    backgroundColor: '#FFF8F0',
+    padding: 20,
     alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0E8DC',
   },
-  wordTitle: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#4A90E2',
-    textAlign: 'center',
-    marginBottom: 8,
+  wordEmoji: { fontSize: 56, marginBottom: 8 },
+  wordBig: { fontSize: 30, fontWeight: '900', color: '#1A1A1A', letterSpacing: 2, marginBottom: 12 },
+  pronunciationBtn: {
+    backgroundColor: '#F97316',
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    shadowColor: '#F97316',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 3,
   },
-  emoji: {
-    fontSize: 56,
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  button: {
-    alignSelf: 'center',
-    backgroundColor: '#4A90E2',
-    paddingHorizontal: 36,
+  pronunciationBtnText: { fontSize: 13, fontWeight: '700', color: 'white' },
+  section: { padding: 14, borderBottomWidth: 1, borderBottomColor: '#F5F0EA' },
+  sectionTitle: { fontSize: 9, fontWeight: '700', color: '#F97316', letterSpacing: 1, marginBottom: 6 },
+  sectionText: { fontSize: 14, color: '#333', lineHeight: 22 },
+  sectionItalic: { fontSize: 13, color: '#888', fontStyle: 'italic', lineHeight: 20 },
+  practiceBtn: {
+    margin: 14,
+    backgroundColor: '#F97316',
+    borderRadius: 14,
     paddingVertical: 14,
-    borderRadius: 25,
-    marginBottom: 20,
-    minWidth: 200,
     alignItems: 'center',
+    shadowColor: '#F97316',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  loadingCard: {
-    alignItems: 'center',
+  practiceBtnDisabled: { opacity: 0.45 },
+  practiceBtnText: { fontSize: 15, fontWeight: '800', color: 'white' },
+  bottomNav: {
+    flexDirection: 'row',
     gap: 10,
-    marginTop: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: 'white',
+    borderTopWidth: 1,
+    borderTopColor: '#F0EAE0',
   },
-  sectionLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#888',
-    textTransform: 'uppercase',
-    marginBottom: 4,
-    marginTop: 10,
+  navBtn: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#F0E8DC',
+    paddingVertical: 12,
+    alignItems: 'center',
   },
-  definition: {
-    fontSize: 17,
-    color: '#333',
-    lineHeight: 24,
+  navBtnDisabled: { opacity: 0.35 },
+  navBtnText: { fontSize: 13, fontWeight: '700', color: '#999' },
+  navBtnTextDisabled: { color: '#ccc' },
+  navBtnPrimary: {
+    flex: 1,
+    borderRadius: 12,
+    backgroundColor: '#F97316',
+    paddingVertical: 12,
+    alignItems: 'center',
   },
-  example: {
-    fontSize: 16,
-    color: '#666',
-    fontStyle: 'italic',
-    lineHeight: 22,
+  navBtnPrimaryText: { fontSize: 13, fontWeight: '700', color: 'white' },
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: 'white',
+    borderTopWidth: 0.5,
+    borderTopColor: '#F0EAE0',
+    paddingBottom: 20,
+    paddingTop: 8,
   },
+  tabItem: { flex: 1, alignItems: 'center' },
+  tabIcon: { fontSize: 20, marginBottom: 2 },
+  tabLabel: { fontSize: 9, color: '#B0BEC5', fontWeight: '600' },
+
+  centered: { justifyContent: 'center', alignItems: 'center' },
   muted: {
     marginTop: 12,
     fontSize: 16,
@@ -994,62 +1053,24 @@ const styles = StyleSheet.create({
   },
   errorBanner: {
     marginTop: 16,
+    marginHorizontal: 14,
     color: '#c00',
     fontSize: 14,
     textAlign: 'center',
   },
-  practiceNavBtn: {
-    marginTop: 28,
-    alignSelf: 'stretch',
-    backgroundColor: '#4A90E2',
-    paddingVertical: 16,
-    borderRadius: 14,
+  loadingCard: {
     alignItems: 'center',
-  },
-  practiceNavBtnDisabled: {
-    opacity: 0.45,
-  },
-  practiceNavBtnText: {
-    color: '#fff',
-    fontSize: 17,
-    fontWeight: '800',
+    gap: 10,
+    marginTop: 8,
+    paddingVertical: 12,
   },
   backButton: {
     alignSelf: 'center',
     paddingVertical: 12,
   },
-  bottomCounter: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '600',
-    textAlign: 'center',
-    marginTop: 10,
-    marginBottom: 8,
-  },
-  bottomNavRow: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 6,
-  },
-  secondaryNavBtn: {
-    flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.88)',
-    borderWidth: 1.5,
-    borderColor: '#4A90E2',
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  secondaryNavBtnDisabled: {
-    opacity: 0.45,
-  },
-  secondaryNavBtnText: {
-    color: '#4A90E2',
-    fontSize: 16,
-    fontWeight: '700',
-  },
   backText: {
-    color: '#4A90E2',
+    color: '#F97316',
     fontSize: 16,
+    fontWeight: '600',
   },
 });

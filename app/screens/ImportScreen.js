@@ -18,7 +18,6 @@ import {
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
-import { LinearGradient } from 'expo-linear-gradient';
 
 import { extractTextFromPdfPage1Base64 } from '../../lib/pdfPage1Text';
 import { supabase } from '../../lib/supabase';
@@ -693,20 +692,63 @@ export default function ImportScreen() {
       style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <LinearGradient colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']} style={styles.container}>
-        <View style={styles.bgDecor} pointerEvents="none">
-          <View style={[styles.cloud, { top: 38, left: 18, width: 80, height: 36 }]} />
-          <View style={[styles.cloud, { top: 28, left: 55, width: 60, height: 28 }]} />
-          <View style={styles.sun} />
+      <View style={styles.container}>
+        <View style={styles.pageHeader}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <Text style={styles.backBtnText}>←</Text>
+          </TouchableOpacity>
+          <View>
+            <Text style={styles.pageTitle}>Import Word List</Text>
+            <Text style={styles.pageSubtitle}>Choose how to add words</Text>
+          </View>
         </View>
-      <ScrollView
-        ref={scrollRef}
-        style={styles.scroll}
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: 300 }]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator
-      >
-      <Text style={styles.title}>Import Word List</Text>
+
+        <ScrollView
+          ref={scrollRef}
+          style={styles.scrollArea}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 300 }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator
+        >
+          <TouchableOpacity
+            style={styles.importCardPrimary}
+            onPress={onTakePhoto}
+            disabled={isExtracting}
+          >
+            <Text style={styles.importIcon}>📷</Text>
+            <View style={styles.importInfo}>
+              <Text style={styles.importTitlePrimary}>Take a Photo</Text>
+              <Text style={styles.importSubPrimary}>Scan your school word list</Text>
+            </View>
+            <Text style={styles.importArrowPrimary}>→</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.importCard} onPress={onChooseFromLibrary}>
+            <Text style={styles.importIcon}>🖼️</Text>
+            <View style={styles.importInfo}>
+              <Text style={styles.importTitle}>Choose from Library</Text>
+              <Text style={styles.importSub}>Select an existing photo</Text>
+            </View>
+            <Text style={styles.importArrow}>›</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.importCard} onPress={onUploadFromFiles}>
+            <Text style={styles.importIcon}>📄</Text>
+            <View style={styles.importInfo}>
+              <Text style={styles.importTitle}>Upload from Files</Text>
+              <Text style={styles.importSub}>PDF or image file</Text>
+            </View>
+            <Text style={styles.importArrow}>›</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.importCard} onPress={() => setShowManual(true)}>
+            <Text style={styles.importIcon}>✏️</Text>
+            <View style={styles.importInfo}>
+              <Text style={styles.importTitle}>Type Manually</Text>
+              <Text style={styles.importSub}>Enter words one by one</Text>
+            </View>
+            <Text style={styles.importArrow}>›</Text>
+          </TouchableOpacity>
 
       {photoQueue.length > 0 ? (
         <ScrollView
@@ -724,11 +766,7 @@ export default function ImportScreen() {
         </ScrollView>
       ) : null}
 
-      {photoQueue.length === 0 ? (
-        <TouchableOpacity style={styles.button} onPress={onTakePhoto} disabled={isExtracting}>
-          <Text style={styles.buttonText}>📷 Take a Photo</Text>
-        </TouchableOpacity>
-      ) : (
+      {photoQueue.length > 0 ? (
         <>
           <TouchableOpacity
             style={styles.button}
@@ -750,25 +788,7 @@ export default function ImportScreen() {
             )}
           </TouchableOpacity>
         </>
-      )}
-
-      <TouchableOpacity
-        style={[styles.button, styles.secondButton]}
-        onPress={onChooseFromLibrary}
-      >
-        <Text style={styles.buttonText}>🖼️ Choose from Library</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity style={[styles.button, styles.filesButton]} onPress={onUploadFromFiles}>
-        <Text style={styles.buttonText}>📄 Upload from Files</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={[styles.button, styles.secondButton]}
-        onPress={() => setShowManual(true)}
-      >
-        <Text style={styles.buttonText}>✏️ Type Manually</Text>
-      </TouchableOpacity>
+      ) : null}
 
       {isExtracting ? (
         <View style={styles.processingBox}>
@@ -930,47 +950,102 @@ export default function ImportScreen() {
         </View>
       ) : null}
 
-      <TouchableOpacity
-        style={styles.backButton}
-        onPress={() => router.back()}
-      >
-        <Text style={styles.backText}>← Back</Text>
-      </TouchableOpacity>
-      </ScrollView>
-      </LinearGradient>
+        </ScrollView>
+
+        <View style={styles.tabBar}>
+          <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/')}>
+            <Text style={styles.tabIcon}>🏠</Text>
+            <Text style={styles.tabLabel}>Home</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/album')}>
+            <Text style={styles.tabIcon}>🏅</Text>
+            <Text style={styles.tabLabel}>Album</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/history')}>
+            <Text style={styles.tabIcon}>📊</Text>
+            <Text style={styles.tabLabel}>History</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/settings')}>
+            <Text style={styles.tabIcon}>⚙️</Text>
+            <Text style={styles.tabLabel}>Settings</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  bgDecor: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  cloud: { position: 'absolute', backgroundColor: 'white', borderRadius: 99, opacity: 0.85 },
-  sun: {
-    position: 'absolute',
-    top: 32,
-    right: 24,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#FFD740',
-    opacity: 0.8,
-  },
-  scroll: {
-    flex: 1,
-    width: '100%',
-    backgroundColor: 'transparent',
-  },
-  scrollContent: {
+  container: { flex: 1, backgroundColor: '#FFF8F0' },
+  pageHeader: {
+    backgroundColor: '#FFF8F0',
+    paddingHorizontal: 16,
+    paddingTop: 56,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0E8DC',
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 70,
+    gap: 12,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 40,
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'white',
+    borderWidth: 1.5,
+    borderColor: '#F0E8DC',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  backBtnText: { fontSize: 18, color: '#F97316', fontWeight: '700' },
+  pageTitle: { fontSize: 16, fontWeight: '800', color: '#1A1A1A' },
+  pageSubtitle: { fontSize: 10, color: '#999', marginTop: 1 },
+  scrollArea: { flex: 1 },
+  scrollContent: { padding: 14, gap: 8, alignItems: 'stretch' },
+  importCardPrimary: {
+    backgroundColor: '#F97316',
+    borderRadius: 14,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    shadowColor: '#F97316',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  importCard: {
+    backgroundColor: 'white',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#F0E8DC',
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  importIcon: { fontSize: 24 },
+  importInfo: { flex: 1 },
+  importTitlePrimary: { fontSize: 14, fontWeight: '700', color: 'white' },
+  importTitle: { fontSize: 14, fontWeight: '700', color: '#1A1A1A' },
+  importSubPrimary: { fontSize: 10, color: 'rgba(255,255,255,0.75)', marginTop: 2 },
+  importSub: { fontSize: 10, color: '#999', marginTop: 2 },
+  importArrowPrimary: { fontSize: 18, color: 'white', fontWeight: '700' },
+  importArrow: { fontSize: 18, color: '#F97316', fontWeight: '700' },
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: 'white',
+    borderTopWidth: 0.5,
+    borderTopColor: '#F0EAE0',
+    paddingBottom: 20,
+    paddingTop: 8,
+  },
+  tabItem: { flex: 1, alignItems: 'center' },
+  tabIcon: { fontSize: 20, marginBottom: 2 },
+  tabLabel: { fontSize: 9, color: '#B0BEC5', fontWeight: '600' },
+
   button: {
     backgroundColor: '#FFA726',
     paddingHorizontal: 40,
@@ -978,13 +1053,11 @@ const styles = StyleSheet.create({
     borderRadius: 25,
     marginBottom: 15,
     width: 250,
+    alignSelf: 'center',
     alignItems: 'center',
   },
   secondButton: {
     backgroundColor: '#66BB6A',
-  },
-  filesButton: {
-    backgroundColor: '#F5A623',
   },
   buttonText: {
     color: '#fff',
@@ -1018,11 +1091,15 @@ const styles = StyleSheet.create({
   },
   manualSection: {
     marginTop: 25,
-    width: '90%',
+    width: '100%',
+    maxWidth: 420,
+    alignSelf: 'center',
   },
   extractedSection: {
     marginTop: 20,
-    width: '90%',
+    width: '100%',
+    maxWidth: 420,
+    alignSelf: 'center',
   },
   sectionLabel: {
     alignSelf: 'stretch',
@@ -1071,14 +1148,18 @@ const styles = StyleSheet.create({
     color: '#555',
   },
   previewImage: {
-    width: '90%',
+    width: '100%',
+    maxWidth: 420,
+    alignSelf: 'center',
     height: 200,
     borderRadius: 12,
     marginTop: 16,
     backgroundColor: '#f4f4f4',
   },
   pdfPreviewBox: {
-    width: '90%',
+    width: '100%',
+    maxWidth: 420,
+    alignSelf: 'center',
     marginTop: 16,
     padding: 16,
     borderRadius: 12,

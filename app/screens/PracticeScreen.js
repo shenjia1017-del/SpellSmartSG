@@ -3,7 +3,6 @@ import { useNavigation } from '@react-navigation/native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
-import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -26,9 +25,8 @@ import {
   TTS_VOICE_PHONEME,
 } from '../../lib/phonics';
 import { supabase } from '../../lib/supabase';
-import { updateWordMastery } from '../lib/gardenHelpers';
 
-const BLUE = '#4A90E2';
+const BLUE = '#F97316';
 const GRAY = '#999';
 const GRAY_LIGHT = '#e8e8e8';
 const DARK_GRAY = '#444';
@@ -232,21 +230,6 @@ export default function PracticeScreen() {
   const exampleSentence = String(
     paramStr(params, 'exampleSentence') || paramStr(params, 'example'),
   ).trim();
-  const wordsFromParams = useMemo(() => {
-    const raw = paramStr(params, 'wordsJSON');
-    if (!raw.trim()) return [];
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }, [params]);
-  const currentWord = useMemo(() => {
-    const target = String(word || practiceWord).trim().toLowerCase();
-    return wordsFromParams.find((w) => String(w?.word ?? '').trim().toLowerCase() === target) ?? null;
-  }, [wordsFromParams, word, practiceWord]);
-  const weekLabel = String(currentWord?.week_label ?? paramStr(params, 'weekLabel') ?? '').trim();
   const graphemesPronunciation = useMemo(() => {
     const raw = paramStr(params, 'graphemesPronunciationJSON');
     if (!raw.trim()) return {};
@@ -259,7 +242,7 @@ export default function PracticeScreen() {
     return {};
   }, [params.graphemesPronunciationJSON]);
 
-  const [tab, setTab] = useState('sound');
+  const [tab, setTab] = useState('remember');
   const [ttsBusy, setTtsBusy] = useState(false);
 
   const soundRef = useRef(null);
@@ -297,6 +280,11 @@ export default function PracticeScreen() {
   const [fillInLoading, setFillInLoading] = useState(false);
   const [fillInCorrect, setFillInCorrect] = useState(false);
   const [fillInWrongIndex, setFillInWrongIndex] = useState(null);
+  const [rememberSlots, setRememberSlots] = useState([]);
+  const [lcwcStage, setLcwcStage] = useState('look');
+  const [rememberTimerMs, setRememberTimerMs] = useState(5000);
+  const [rememberIsCorrect, setRememberIsCorrect] = useState(false);
+  const [rememberReveal, setRememberReveal] = useState('');
 
   /** Words in the practice phrase (space = boundary). */
   const practiceWordWords = useMemo(
@@ -501,12 +489,12 @@ export default function PracticeScreen() {
   }, [syllables, practiceWord]);
 
   const resetSpelling = useCallback(() => {
-    const w = practiceWord.toLowerCase();
+    const w = practiceWord.replace(/ /g, '').toLowerCase();
     const inv = {};
     for (const ch of w) {
       inv[ch] = (inv[ch] || 0) + 1;
     }
-    setSpellSlots(Array(practiceWord.length).fill(null));
+    setSpellSlots(Array(w.length).fill(null));
     setSpellInventory(inv);
     setSpellingDone(false);
   }, [practiceWord]);
@@ -633,19 +621,7 @@ export default function PracticeScreen() {
     });
   };
 
-  const recordPracticeMastery = async (isCorrect) => {
-    const { data: { user } = {} } = await supabase.auth.getUser();
-    if (user && currentWord?.id) {
-      await updateWordMastery(
-        user.id,
-        currentWord.id,
-        weekLabel,
-        isCorrect
-      );
-    }
-  };
-
-  const checkSyllables = async () => {
+  const checkSyllables = () => {
     if (!sylSlots.every(Boolean)) return;
     let expected = syllablesTileList(syllables, practiceWord);
     if (expected.length === 0) {
@@ -654,7 +630,6 @@ export default function PracticeScreen() {
     const expLower = expected.map((s) => s.toLowerCase());
     const got = sylSlots.map((s) => s.text.toLowerCase());
     const ok = got.length === expLower.length && got.every((g, i) => g === expLower[i]);
-    await recordPracticeMastery(ok);
     if (ok) {
       playSuccessSound();
       runGreenFlash(sylFlash, () => {
@@ -759,7 +734,7 @@ export default function PracticeScreen() {
     }
   };
 
-  const checkPhonics = async () => {
+  const checkPhonics = () => {
     const complete = phAnswers.every((box, i) => (i === phSpaceIndexRef.current ? true : box != null));
     if (!complete) return;
     const expectedTexts = phExpectedRef.current;
@@ -768,7 +743,6 @@ export default function PracticeScreen() {
     const expNorm = expectedTexts.map(normTile);
     const got = phAnswers.map((box, i) => (i === phSpaceIndexRef.current ? normTile(' ') : normTile(box)));
     const ok = got.length === expNorm.length && got.every((g, i) => g === expNorm[i]);
-    await recordPracticeMastery(ok);
     if (ok) {
       playSuccessSound();
       runGreenFlash(phFlash, () => {
@@ -791,8 +765,18 @@ export default function PracticeScreen() {
     Vibration.vibrate(10);
   }, []);
 
+  const wordChars = useMemo(() => String(practiceWord || '').split(''), [practiceWord]);
+  const correctLetters = useMemo(
+    () => String(practiceWord || '').replace(/ /g, '').toLowerCase().split(''),
+    [practiceWord],
+  );
+
   const onSpellKey = async (char) => {
     if (spellingDone) return;
+    if (char === ' ') {
+      playKeyboardClick();
+      return;
+    }
     const idx = spellSlots.findIndex((s) => s == null);
     if (idx === -1) return;
     const inv = { ...spellInventory };
@@ -856,11 +840,10 @@ export default function PracticeScreen() {
     });
   }, [params, router]);
 
-  const checkSpelling = async () => {
+  const checkSpelling = () => {
     if (spellSlots.some((x) => x == null)) return;
     const built = spellSlots.join('');
-    const ok = built === practiceWord.toLowerCase();
-    await recordPracticeMastery(ok);
+    const ok = built === correctLetters.join('');
     if (ok) {
       playSuccessSound();
       runGreenFlash(spFlash, () => {});
@@ -883,10 +866,8 @@ export default function PracticeScreen() {
   const onFillInChoicePress = (choice, index) => {
     if (fillInCorrect) return;
     const ok = String(choice).toLowerCase() === practiceWord.toLowerCase();
-    recordPracticeMastery(ok).catch(() => {});
     if (ok) {
       setFillInCorrect(true);
-      playSuccessSound();
       if (fillAdvanceTimerRef.current) clearTimeout(fillAdvanceTimerRef.current);
       fillAdvanceTimerRef.current = setTimeout(() => {
         fillAdvanceTimerRef.current = null;
@@ -899,10 +880,66 @@ export default function PracticeScreen() {
     }
   };
 
+  const rememberChars = useMemo(() => String(practiceWord || '').split(''), [practiceWord]);
+  const rememberTarget = useMemo(
+    () => String(practiceWord || '').replace(/ /g, '').toLowerCase(),
+    [practiceWord],
+  );
+  const hasRememberInput = rememberSlots.some((x) => x != null && x !== ' ');
+
+  const resetRememberFlow = useCallback(() => {
+    setLcwcStage('look');
+    setRememberSlots(Array(rememberTarget.length).fill(null));
+    setRememberTimerMs(5000);
+    setRememberIsCorrect(false);
+    setRememberReveal('');
+  }, [rememberTarget]);
+
+  const onRememberKey = (char) => {
+    if (lcwcStage !== 'write') return;
+    if (char === ' ') return;
+    const idx = rememberSlots.findIndex((s) => s == null);
+    if (idx === -1) return;
+    setRememberSlots((prev) => {
+      const n = [...prev];
+      n[idx] = String(char).toLowerCase();
+      return n;
+    });
+  };
+
+  const onRememberBackspace = () => {
+    if (lcwcStage !== 'write') return;
+    let last = -1;
+    for (let i = rememberSlots.length - 1; i >= 0; i -= 1) {
+      if (rememberSlots[i] != null) {
+        last = i;
+        break;
+      }
+    }
+    if (last < 0) return;
+    setRememberSlots((prev) => {
+      const n = [...prev];
+      n[last] = null;
+      return n;
+    });
+  };
+
+  const checkRemember = () => {
+    if (lcwcStage !== 'write') return;
+    if (!hasRememberInput) return;
+    const typed = rememberSlots.join('').toLowerCase();
+    const ok = typed === rememberTarget;
+    setLcwcStage('check');
+    setRememberIsCorrect(ok);
+    if (ok) {
+      setRememberReveal('✓ Well done! You got it right!');
+    } else {
+      setRememberReveal(`✗ The correct spelling is: ${String(practiceWord || '').toUpperCase()}`);
+    }
+  };
+
   const onFooterSkip = () => {
-    if (tab === 'syllables') {
-      setTab('phonics');
-    } else if (tab === 'phonics') {
+    if (tab === 'remember') {
       setTab('fill');
     } else if (tab === 'fill') {
       setTab('spelling');
@@ -922,7 +959,40 @@ export default function PracticeScreen() {
   const canCheckSp = !spellSlots.some((x) => x == null) && practiceWord.length > 0;
 
   const showCheckButton =
-    !spellingDone && tab !== 'sound' && tab !== 'fill';
+    !spellingDone && tab === 'spelling';
+
+  useEffect(() => {
+    if (tab !== 'remember') return;
+    resetRememberFlow();
+  }, [tab, resetRememberFlow]);
+
+  useEffect(() => {
+    if (tab !== 'remember') return;
+    resetRememberFlow();
+  }, [practiceWord, tab, resetRememberFlow]);
+
+  useEffect(() => {
+    if (tab !== 'remember' || lcwcStage !== 'look') return;
+    setRememberTimerMs(5000);
+    const startedAt = Date.now();
+    const tick = setInterval(() => {
+      const left = Math.max(0, 5000 - (Date.now() - startedAt));
+      setRememberTimerMs(left);
+    }, 100);
+    const autoNext = setTimeout(() => {
+      setLcwcStage('write');
+      setRememberTimerMs(0);
+    }, 5000);
+    return () => {
+      clearInterval(tick);
+      clearTimeout(autoNext);
+    };
+  }, [tab, lcwcStage]);
+
+  useEffect(() => {
+    if (tab !== 'remember' || lcwcStage !== 'look') return;
+    void playTts(practiceWord);
+  }, [tab, lcwcStage, practiceWord]);
 
   if (!practiceWord) {
     return (
@@ -942,14 +1012,9 @@ export default function PracticeScreen() {
     });
 
   return (
-    <LinearGradient colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']} style={styles.root}>
-      <View style={styles.bgDecor} pointerEvents="none">
-        <View style={[styles.cloud, { top: 38, left: 18, width: 80, height: 36 }]} />
-        <View style={[styles.cloud, { top: 28, left: 55, width: 60, height: 28 }]} />
-        <View style={styles.sun} />
-      </View>
+    <View style={styles.root}>
       <View style={styles.headerBar}>
-        <TouchableOpacity style={styles.headerBack} onPress={goBackLearn} hitSlop={12}>
+        <TouchableOpacity style={styles.headerBack} onPress={() => router.back()} hitSlop={12}>
           <Text style={styles.headerBackText}>← Back</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Practice</Text>
@@ -958,11 +1023,9 @@ export default function PracticeScreen() {
 
       <View style={styles.tabRow}>
         {[
-          { key: 'sound', label: 'Sound It Out' },
-          { key: 'syllables', label: 'Syllables' },
-          { key: 'phonics', label: 'Phonics' },
-          { key: 'fill', label: 'Fill In' },
-          { key: 'spelling', label: 'Spelling' },
+          { key: 'remember', label: '👁️ Remember' },
+          { key: 'fill', label: '📝 Fill In' },
+          { key: 'spelling', label: '✏️ Spelling' },
         ].map(({ key, label }) => (
           <TouchableOpacity key={key} style={styles.tabCell} onPress={() => setTab(key)}>
             <Text
@@ -1000,236 +1063,174 @@ export default function PracticeScreen() {
           )}
         </View>
 
-        {tab === 'sound' ? (
-          phonicsGroups.length === 0 ? (
-            <View style={styles.section}>
-              <Text style={styles.phonicsMissingText}>
-                Sound blocks are missing (practiceGraphemes was not loaded). Go back to Learn and open this word
-                again, or continue to Syllables.
-              </Text>
-              <TouchableOpacity style={styles.phonicsSkipBtn} onPress={() => setTab('syllables')}>
-                <Text style={styles.phonicsSkipBtnText}>Continue to Syllables →</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={styles.section}>
-              <Text style={styles.sectionHint}>Tap each sound block to hear it</Text>
-              {soundDisplayWordGroups ? (
-                <>
-                  {(() => {
-                    let soundIdx = 0;
-                    return soundDisplayWordGroups.map((group, wi) => (
-                      <React.Fragment key={`sound-w-${wi}`}>
-                        <View style={styles.soundCardWrap}>
-                          {group.map((gr) => {
-                            const tileIdx = soundIdx;
-                            soundIdx += 1;
-                            const pronSmall =
-                              resolvePhonicsTtsInput(gr, graphemesPronunciation) || gr;
-                            const displayGrapheme = stripPipeDisplay(gr);
-                            const displayPron = stripPipeDisplay(pronSmall);
-                            return (
-                              <TouchableOpacity
-                                key={`sound-${tileIdx}-${gr}`}
-                                style={styles.soundCard}
-                                onPress={() => void playPhonemeSoundAtIndex(tileIdx)}
-                                activeOpacity={0.75}
-                              >
-                                <Text style={styles.soundCardGrapheme}>{displayGrapheme}</Text>
-                                <Text style={styles.soundCardPron} numberOfLines={2}>
-                                  {displayPron}
-                                </Text>
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </View>
-                        {wi < soundDisplayWordGroups.length - 1 ? (
-                          <View
-                            style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 8 }}
-                          >
-                            <View style={{ flex: 1, height: 0.5, backgroundColor: '#ccc' }} />
-                            <Text style={{ fontSize: 11, color: '#aaa', paddingHorizontal: 8 }}>space</Text>
-                            <View style={{ flex: 1, height: 0.5, backgroundColor: '#ccc' }} />
-                          </View>
-                        ) : null}
-                      </React.Fragment>
-                    ));
-                  })()}
-                </>
-              ) : (
-                <View style={styles.soundCardWrap}>
-                  {phonicsGroups.map((gr, i) => {
-                    const pronSmall =
-                      resolvePhonicsTtsInput(gr, graphemesPronunciation) || gr;
-                    const displayGrapheme = stripPipeDisplay(gr);
-                    const displayPron = stripPipeDisplay(pronSmall);
-                    return (
-                      <TouchableOpacity
-                        key={`sound-${i}-${gr}`}
-                        style={styles.soundCard}
-                        onPress={() => void playPhonemeSoundAtIndex(i)}
-                        activeOpacity={0.75}
-                      >
-                        <Text style={styles.soundCardGrapheme}>{displayGrapheme}</Text>
-                        <Text style={styles.soundCardPron} numberOfLines={2}>
-                          {displayPron}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              )}
-              <View style={styles.soundNavRow}>
-                <TouchableOpacity style={styles.soundNextBtn} onPress={() => setTab('syllables')}>
-                  <Text style={styles.soundNextBtnText}>Next →</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.soundSkipBtn} onPress={() => setTab('phonics')}>
-                  <Text style={styles.soundSkipBtnText}>Skip →</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )
-        ) : null}
-
-        {tab === 'syllables' ? (
+        {tab === 'remember' ? (
           <View style={styles.section}>
-            <Text style={styles.sectionHint}>Build the word from syllables. Tap a slot to return a tile.</Text>
-            <Animated.View style={{ transform: [{ translateX: sylShake }] }}>
-              <Animated.View
+            <View style={styles.lcwcPillsRow}>
+              <View
                 style={[
-                  styles.slotWrap,
-                  { backgroundColor: flashBg(sylFlash) },
+                  styles.lcwcPill,
+                  lcwcStage === 'look' ? styles.lcwcPillActive : lcwcStage !== 'look' ? styles.lcwcPillDone : null,
                 ]}
               >
-                <View style={styles.slotRow}>
-                  {sylSlots.map((slot, idx) => (
-                    <TouchableOpacity
-                      key={`syl-slot-${idx}`}
-                      style={[styles.sylSlot, slot && styles.sylSlotFilled]}
-                      onPress={() => onSylSlotTap(idx)}
-                    >
-                      <Text style={styles.slotText}>{slot ? stripPipeDisplay(slot.text) : ''}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </Animated.View>
-            </Animated.View>
-            <View style={styles.tileWrap}>
-              {groupedSylPool.map((group, groupIdx) => (
-                <React.Fragment key={`syl-group-${groupIdx}`}>
-                  {group.map((item) => (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={[styles.tile, item.placed && styles.tileGhost]}
-                      onPress={() => onSylPoolTap(item)}
-                      disabled={item.placed}
-                    >
-                      <Text style={[styles.tileText, item.placed && styles.tileTextGhost]}>
-                        {stripPipeDisplay(item.text)}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                  {groupIdx < groupedSylPool.length - 1 ? (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', width: '100%', marginVertical: 8 }}>
-                      <View style={{ flex: 1, height: 0.5, backgroundColor: '#ccc' }} />
-                      <Text style={{ fontSize: 11, color: '#aaa', paddingHorizontal: 8 }}>space</Text>
-                      <View style={{ flex: 1, height: 0.5, backgroundColor: '#ccc' }} />
-                    </View>
-                  ) : null}
-                </React.Fragment>
-              ))}
-            </View>
-          </View>
-        ) : null}
-
-        {tab === 'phonics' ? (
-          phAnswers.length === 0 && phGroup0.length === 0 && phGroup1.length === 0 ? (
-            <View style={styles.section}>
-              <Text style={styles.phonicsMissingText}>
-                Phonics groups are missing (practiceGraphemes was not loaded). Go back to Learn and open this word
-                again, or continue to Spelling.
-              </Text>
-              <TouchableOpacity style={styles.phonicsSkipBtn} onPress={() => setTab('fill')}>
-                <Text style={styles.phonicsSkipBtnText}>Continue to Fill In →</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={styles.section}>
-              <Text style={styles.sectionHint}>
-                Build with grapheme tiles from your card. Tap the next empty box to hear that sound. Tap a filled
-                box to return the tile to the bank. The word break is fixed — only grapheme tiles move.
-              </Text>
-              <Animated.View style={{ transform: [{ translateX: phShake }] }}>
-                <Animated.View style={[styles.slotWrap, { backgroundColor: flashBg(phFlash) }]}>
-                  <View style={styles.phAnswerRow}>
-                    {phAnswers.map((slot, idx) => {
-                      if (idx === phSpaceIndexRef.current) {
-                        return (
-                          <View key={`ph-answer-space-${idx}`} style={styles.phAnswerSpaceGap} pointerEvents="none" />
-                        );
-                      }
-                      const soundIdx = phSpaceIndexRef.current >= 0 && idx > phSpaceIndexRef.current ? idx - 1 : idx;
-                      return (
-                        <Pressable
-                          key={`ph-slot-${idx}`}
-                          style={({ pressed }) => [
-                            styles.phAnswerGraphemeSlot,
-                            slot ? styles.phBoxFilled : styles.phBoxEmpty,
-                            pressed && styles.phBoxPressed,
-                          ]}
-                          onPress={() => {
-                            if (slot) {
-                              onPhSlotTap(idx);
-                            } else {
-                              void playPhonemeSoundAtIndex(soundIdx);
-                            }
-                          }}
-                        >
-                          <Text style={styles.slotText}>{slot ? stripPipeDisplay(String(slot)) : ''}</Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
-                </Animated.View>
-              </Animated.View>
-              <View style={styles.phPoolColumn}>
-                <View style={styles.phPoolWordRow}>
-                  {phGroup0.map((item, i) => (
-                    <TouchableOpacity
-                      key={`ph-g0-${i}-${item}`}
-                      style={styles.phPoolTile}
-                      onPress={() => onPhPoolTap(item)}
-                      activeOpacity={0.75}
-                    >
-                      <Text style={styles.phPoolTileText}>{stripPipeDisplay(item)}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                {phGroup1.length > 0 ? (
-                  <>
-                    <View style={styles.phPoolWordDivider}>
-                      <View style={styles.phPoolWordDividerLineRow}>
-                        <View style={styles.phPoolWordDividerLine} />
-                      </View>
-                      <Text style={styles.phPoolWordDividerText}>—— space ——</Text>
-                    </View>
-                    <View style={styles.phPoolWordRow}>
-                      {phGroup1.map((item, i) => (
-                        <TouchableOpacity
-                          key={`ph-g1-${i}-${item}`}
-                          style={styles.phPoolTile}
-                          onPress={() => onPhPoolTap(item)}
-                          activeOpacity={0.75}
-                        >
-                          <Text style={styles.phPoolTileText}>{stripPipeDisplay(item)}</Text>
-                        </TouchableOpacity>
-                      ))}
-                    </View>
-                  </>
-                ) : null}
+                <Text style={[styles.lcwcPillText, (lcwcStage === 'look' || lcwcStage !== 'look') && styles.lcwcPillTextOn]}>
+                  {lcwcStage === 'look' ? '👁 LOOK' : '👁 LOOK ✓'}
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.lcwcPill,
+                  lcwcStage === 'write' ? styles.lcwcPillActive : lcwcStage === 'check' ? styles.lcwcPillDone : null,
+                ]}
+              >
+                <Text style={[styles.lcwcPillText, (lcwcStage === 'write' || lcwcStage === 'check') && styles.lcwcPillTextOn]}>
+                  {lcwcStage === 'check' ? '✏️ WRITE ✓' : '✏️ WRITE'}
+                </Text>
+              </View>
+              <View style={[styles.lcwcPill, lcwcStage === 'check' && styles.lcwcPillActive]}>
+                <Text style={[styles.lcwcPillText, lcwcStage === 'check' && styles.lcwcPillTextOn]}>✓ CHECK</Text>
               </View>
             </View>
-          )
+
+            {lcwcStage === 'look' ? (
+              <>
+                <View style={styles.rememberWordCard}>
+                  <Text style={styles.rememberWordCardText}>{String(practiceWord ?? '').toUpperCase()}</Text>
+                </View>
+                <View style={styles.rememberTimerTrack}>
+                  <View style={[styles.rememberTimerFill, { width: `${(rememberTimerMs / 5000) * 100}%` }]} />
+                </View>
+                <Text style={styles.rememberStageHint}>Look carefully — disappears in 5s...</Text>
+              </>
+            ) : null}
+
+            {lcwcStage === 'write' ? (
+              <View style={styles.rememberHiddenBox}>
+                <Text style={styles.rememberHiddenText}>Word is hidden — type from memory!</Text>
+              </View>
+            ) : null}
+
+            {lcwcStage === 'check' ? (
+              <View style={styles.rememberWordCard}>
+                <Text style={styles.rememberWordCardText}>{String(practiceWord ?? '').toUpperCase()}</Text>
+              </View>
+            ) : null}
+
+            {lcwcStage !== 'look' ? (
+              <View style={[styles.slotWrap, styles.rememberSlotsWrap]}>
+                <View style={styles.spellRow}>
+                  {(() => {
+                    let letterIdx = 0;
+                    return rememberChars.map((char, index) => {
+                      if (char === ' ') return <View style={styles.rememberSpaceGap} key={`rm-gap-${index}`} />;
+                      const ch = rememberSlots[letterIdx] ?? '';
+                      const isChecked = lcwcStage === 'check';
+                      const ok = String(ch).toLowerCase() === String(char).toLowerCase();
+                      const node = (
+                        <View
+                          key={`rm-box-${index}`}
+                          style={[
+                            styles.spellBox,
+                            ch && styles.spellBoxFilled,
+                            isChecked && (ok ? styles.rememberBoxCorrect : styles.rememberBoxWrong),
+                          ]}
+                        >
+                          <Text style={[styles.spellBoxText, isChecked && (ok ? styles.rememberLetterOk : styles.rememberLetterBad)]}>
+                            {ch}
+                          </Text>
+                        </View>
+                      );
+                      letterIdx += 1;
+                      return node;
+                    });
+                  })()}
+                </View>
+              </View>
+            ) : null}
+
+            {lcwcStage === 'write' ? (
+              <>
+                <View style={styles.kbdShell}>
+                  <View style={styles.kbdRow}>
+                    {KBD_ROW_1.split('').map((keyChar) => (
+                      <TouchableOpacity
+                        key={`rm-r1-${keyChar}`}
+                        style={[styles.kbdKey, styles.kbdKeyOn]}
+                        onPress={() => onRememberKey(keyChar)}
+                        activeOpacity={0.65}
+                      >
+                        <Text style={[styles.kbdKeyText, styles.kbdKeyTextOn]}>{keyChar}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <View style={styles.kbdRow}>
+                    {KBD_ROW_2.split('').map((keyChar) => (
+                      <TouchableOpacity
+                        key={`rm-r2-${keyChar}`}
+                        style={[styles.kbdKey, styles.kbdKeyOn]}
+                        onPress={() => onRememberKey(keyChar)}
+                        activeOpacity={0.65}
+                      >
+                        <Text style={[styles.kbdKeyText, styles.kbdKeyTextOn]}>{keyChar}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <View style={[styles.kbdRow, styles.kbdRowLast]}>
+                    {KBD_ROW_3.split('').map((keyChar) => (
+                      <TouchableOpacity
+                        key={`rm-r3-${keyChar}`}
+                        style={[styles.kbdKey, styles.kbdKeyOn]}
+                        onPress={() => onRememberKey(keyChar)}
+                        activeOpacity={0.65}
+                      >
+                        <Text style={[styles.kbdKeyText, styles.kbdKeyTextOn]}>{keyChar}</Text>
+                      </TouchableOpacity>
+                    ))}
+                    <TouchableOpacity
+                      style={styles.kbdBackspace}
+                      onPress={onRememberBackspace}
+                      activeOpacity={0.65}
+                    >
+                      <Text style={styles.kbdBackspaceText}>⌫</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.spaceRow}>
+                    <TouchableOpacity
+                      style={[styles.kbdKey, styles.spaceKey]}
+                      onPress={() => onRememberKey(' ')}
+                      activeOpacity={0.65}
+                    >
+                      <Text style={styles.spaceKeyText}>SPACE</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.checkBtn, !hasRememberInput && styles.checkBtnOff]}
+                  onPress={checkRemember}
+                  disabled={!hasRememberInput}
+                >
+                  <Text style={[styles.checkBtnText, !hasRememberInput && styles.checkBtnTextOff]}>Check</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
+
+            {lcwcStage === 'check' ? (
+              <View style={styles.rememberFeedbackBox}>
+                <Text style={[styles.rememberFeedbackText, rememberIsCorrect ? styles.rememberOk : styles.rememberBad]}>
+                  {rememberReveal}
+                </Text>
+                <TouchableOpacity
+                  style={styles.soundNextBtn}
+                  onPress={() => {
+                    resetRememberFlow();
+                    goLearnNextWord();
+                  }}
+                >
+                  <Text style={styles.soundNextBtnText}>Next word →</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+          </View>
         ) : null}
 
         {tab === 'fill' ? (
@@ -1277,11 +1278,20 @@ export default function PracticeScreen() {
             <Animated.View style={{ transform: [{ translateX: spShake }] }}>
               <Animated.View style={[styles.slotWrap, { backgroundColor: flashBg(spFlash) }]}>
                 <View style={styles.spellRow}>
-                {spellSlots.map((ch, idx) => (
-                  <View key={`sp-${idx}`} style={[styles.spellBox, ch && styles.spellBoxFilled]}>
-                    <Text style={styles.spellBoxText}>{ch ?? ''}</Text>
-                  </View>
-                ))}
+                {(() => {
+                  let letterIdx = 0;
+                  return wordChars.map((char, index) => {
+                    if (char === ' ') return <View key={`sp-gap-${index}`} style={styles.rememberSpaceGap} />;
+                    const ch = spellSlots[letterIdx] ?? '';
+                    const node = (
+                      <View key={`sp-box-${index}`} style={[styles.spellBox, ch && styles.spellBoxFilled]}>
+                        <Text style={styles.spellBoxText}>{ch}</Text>
+                      </View>
+                    );
+                    letterIdx += 1;
+                    return node;
+                  });
+                })()}
                 </View>
               </Animated.View>
             </Animated.View>
@@ -1387,35 +1397,33 @@ export default function PracticeScreen() {
           <TouchableOpacity
             style={[
               styles.checkBtn,
-              !(tab === 'syllables' ? canCheckSyl : tab === 'phonics' ? canCheckPh : canCheckSp) &&
-                styles.checkBtnOff,
+              !canCheckSp && styles.checkBtnOff,
             ]}
             onPress={() => {
-              if (tab === 'syllables') checkSyllables();
-              else if (tab === 'phonics') checkPhonics();
-              else checkSpelling();
+              checkSpelling();
             }}
-            disabled={!(tab === 'syllables' ? canCheckSyl : tab === 'phonics' ? canCheckPh : canCheckSp)}
+            disabled={!canCheckSp}
           >
-            <Text style={styles.checkBtnText}>Check</Text>
+            <Text style={[styles.checkBtnText, !canCheckSp && styles.checkBtnTextOff]}>Check</Text>
           </TouchableOpacity>
         ) : null}
       </ScrollView>
 
-      {!spellingDone && tab !== 'sound' ? (
+      {!spellingDone && tab !== 'remember' ? (
         <View style={styles.footer}>
           <TouchableOpacity style={styles.skipBtn} onPress={onFooterSkip}>
             <Text style={styles.skipBtnText}>I&apos;m not sure — Skip</Text>
           </TouchableOpacity>
         </View>
       ) : null}
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   root: {
     flex: 1,
+    backgroundColor: '#FFF8F0',
   },
   bgDecor: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   cloud: { position: 'absolute', backgroundColor: 'white', borderRadius: 99, opacity: 0.85 },
@@ -1437,6 +1445,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: BLUE,
+    paddingTop: 50,
     paddingVertical: 12,
     paddingHorizontal: 8,
   },
@@ -1462,6 +1471,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     borderBottomWidth: 1,
     borderBottomColor: GRAY_LIGHT,
+    backgroundColor: '#FFF8F0',
   },
   tabCell: {
     flex: 1,
@@ -1479,7 +1489,7 @@ const styles = StyleSheet.create({
     color: BLUE,
   },
   tabLabelOff: {
-    color: GRAY,
+    color: '#bbb',
   },
   tabUnderline: {
     height: 3,
@@ -1512,11 +1522,11 @@ const styles = StyleSheet.create({
   },
   defBox: {
     borderWidth: 1,
-    borderColor: GRAY_LIGHT,
+    borderColor: '#F0E8DC',
     borderRadius: 12,
     padding: 14,
     marginBottom: 20,
-    backgroundColor: 'rgba(255,255,255,0.88)',
+    backgroundColor: '#FFF8F0',
   },
   defEmpty: {
     color: GRAY,
@@ -1538,6 +1548,110 @@ const styles = StyleSheet.create({
   },
   section: {
     marginBottom: 8,
+  },
+  lcwcPillsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  lcwcPill: {
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: '#E0E0E0',
+  },
+  lcwcPillActive: {
+    backgroundColor: '#F97316',
+  },
+  lcwcPillDone: {
+    backgroundColor: '#22A050',
+  },
+  lcwcPillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#666',
+  },
+  lcwcPillTextOn: {
+    color: '#fff',
+  },
+  rememberWordCard: {
+    backgroundColor: '#F97316',
+    borderRadius: 14,
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  rememberWordCardText: {
+    color: 'white',
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  rememberTimerTrack: {
+    height: 4,
+    borderRadius: 99,
+    backgroundColor: '#F0E8DC',
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  rememberTimerFill: {
+    height: '100%',
+    backgroundColor: '#F97316',
+  },
+  rememberStageHint: {
+    fontSize: 12,
+    color: '#999',
+    marginBottom: 8,
+  },
+  rememberHiddenBox: {
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderColor: '#F97316',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 10,
+  },
+  rememberHiddenText: {
+    color: '#F97316',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  rememberSpaceGap: {
+    width: 16,
+    height: 36,
+  },
+  rememberBoxCorrect: {
+    borderColor: '#22A050',
+  },
+  rememberBoxWrong: {
+    borderColor: '#E53935',
+  },
+  rememberLetterOk: {
+    color: '#22A050',
+  },
+  rememberLetterBad: {
+    color: '#E53935',
+  },
+  rememberFeedbackBox: {
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#F0E8DC',
+    gap: 10,
+  },
+  rememberFeedbackText: {
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  rememberOk: {
+    color: '#22A050',
+  },
+  rememberBad: {
+    color: '#E53935',
   },
   sectionHint: {
     color: GRAY,
@@ -1627,7 +1741,7 @@ const styles = StyleSheet.create({
   fillSentence: {
     fontSize: 16,
     lineHeight: 24,
-    color: DARK_GRAY,
+    color: '#F97316',
     marginBottom: 16,
     fontWeight: '600',
   },
@@ -1641,7 +1755,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 14,
     paddingHorizontal: 16,
-    backgroundColor: 'rgba(255,255,255,0.88)',
+    backgroundColor: '#FFF3E0',
   },
   fillOptionCorrect: {
     borderColor: '#2d7a16',
@@ -1811,17 +1925,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   spellBox: {
-    width: 34,
-    height: 46,
+    width: 32,
+    height: 36,
     borderWidth: 2,
-    borderColor: BLUE,
+    borderColor: '#F0E8DC',
     borderRadius: 8,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.88)',
   },
   spellBoxFilled: {
-    backgroundColor: '#E8F4FD',
+    borderColor: '#F97316',
+    backgroundColor: '#FFF3E0',
   },
   spellBoxText: {
     fontSize: 18,
@@ -1830,7 +1945,7 @@ const styles = StyleSheet.create({
   },
   kbdShell: {
     marginTop: 12,
-    backgroundColor: '#c4c6ca',
+    backgroundColor: '#D1D5DB',
     borderRadius: 12,
     paddingTop: 10,
     paddingBottom: 12,
@@ -1871,9 +1986,9 @@ const styles = StyleSheet.create({
     borderColor: '#8e8e93',
   },
   kbdKeyOff: {
-    backgroundColor: '#7c7f84',
+    backgroundColor: '#fcfcfe',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#6a6d72',
+    borderColor: '#8e8e93',
   },
   kbdKeyText: {
     fontSize: 17,
@@ -1883,7 +1998,7 @@ const styles = StyleSheet.create({
     color: '#000',
   },
   kbdKeyTextOff: {
-    color: '#c7c7cc',
+    color: '#000',
   },
   kbdBackspace: {
     minWidth: 52,
@@ -1940,12 +2055,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   checkBtnOff: {
-    opacity: 0.45,
+    backgroundColor: '#E0E0E0',
+    opacity: 1,
   },
   checkBtnText: {
     color: '#fff',
     fontSize: 17,
     fontWeight: '800',
+  },
+  checkBtnTextOff: {
+    color: '#999',
   },
   doneBox: {
     marginTop: 20,
@@ -1970,14 +2089,14 @@ const styles = StyleSheet.create({
   },
   skipBtn: {
     borderWidth: 2,
-    borderColor: GRAY,
+    borderColor: '#F0E8DC',
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.88)',
   },
   skipBtnText: {
-    color: GRAY,
+    color: '#999',
     fontSize: 15,
     fontWeight: '700',
   },

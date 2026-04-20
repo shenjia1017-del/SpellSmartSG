@@ -2,13 +2,10 @@ import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { getCollection } from '../lib/gardenHelpers';
 import { CREATURES } from '../constants/gardenData';
-
-const CATEGORIES = ['Insects', 'Birds', 'Animals', 'Ocean', 'Magic'];
 
 export default function AlbumScreen() {
   const [flowers, setFlowers] = useState([]);
@@ -27,114 +24,159 @@ export default function AlbumScreen() {
   }
 
   const unlockedEmojis = new Set(creatures.map(c => c.creature_emoji));
-  const progressPct = Math.round((creatures.length / 50) * 100);
 
   if (loading) return <ActivityIndicator style={{ flex: 1, marginTop: 60 }} />;
 
+  const flowerCollection = flowers.map((f) => ({
+    emoji: f.flower_emoji,
+    name: f.flower_name,
+    count: Number(f.count ?? 1),
+  }));
+  const creatureCollection = creatures.map((c) => ({
+    category: String(c.category ?? '').toLowerCase(),
+    index: Number(c.index ?? -1),
+    emoji: c.creature_emoji ?? c.emoji ?? '',
+  }));
+
   return (
-    <LinearGradient colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']} style={styles.container}>
-      <View style={styles.bgDecor} pointerEvents="none">
-        <View style={[styles.cloud, { top: 38, left: 18, width: 80, height: 36 }]} />
-        <View style={[styles.cloud, { top: 28, left: 55, width: 60, height: 28 }]} />
-        <View style={[styles.cloud, { top: 52, right: 30, width: 70, height: 30 }]} />
-        <View style={styles.sun} />
-      </View>
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
-
-      <Text style={styles.heading}>My album</Text>
-      <Text style={styles.sub}>{creatures.length} / 50 creatures · {flowers.length} flowers</Text>
-
-      <View style={styles.progressBar}>
-        <View style={[styles.progressFill, { width: `${progressPct}%` }]} />
+    <View style={styles.container}>
+      <View style={styles.pageHeader}>
+        <Text style={styles.pageTitle}>My Album</Text>
+        <Text style={styles.pageSubtitle}>Keep learning to unlock more! 🌟</Text>
       </View>
 
-      <Text style={styles.sectionTitle}>Flowers collected</Text>
-      {flowers.length === 0 ? (
-        <Text style={styles.emptyText}>Complete a week to earn your first flower 🌱</Text>
-      ) : (
-        <View style={styles.flowerRow}>
-          {flowers.map((f, i) => (
-            <View key={i} style={styles.flowerItem}>
-              <Text style={styles.flowerEmoji}>{f.flower_emoji}</Text>
-              <Text style={styles.flowerLabel}>{f.flower_name}</Text>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+
+        <Text style={styles.sectionTitle}>FLOWERS COLLECTED 🌸</Text>
+        <View style={styles.flowersGrid}>
+          {flowerCollection && flowerCollection.length > 0 ? (
+            flowerCollection.map((flower, index) => (
+              <View key={index} style={styles.flowerItem}>
+                <View style={styles.flowerBadgeWrap}>
+                  <View style={styles.flowerBox}>
+                    <Text style={styles.flowerEmoji}>{flower.emoji || '🌸'}</Text>
+                  </View>
+                  {flower.count > 1 && (
+                    <View style={styles.flowerCount}>
+                      <Text style={styles.flowerCountText}>×{flower.count}</Text>
+                    </View>
+                  )}
+                </View>
+                <Text style={styles.flowerName}>{flower.name || 'Flower'}</Text>
+              </View>
+            ))
+          ) : (
+            <View style={styles.emptyFlowers}>
+              <Text style={styles.emptyFlowersText}>🌱 Complete your first dictation to earn a flower!</Text>
+            </View>
+          )}
+          {[...Array(Math.max(0, 4 - (flowerCollection?.length || 0)))].map((_, i) => (
+            <View key={`empty-${i}`} style={styles.flowerItem}>
+              <View style={[styles.flowerBox, styles.flowerBoxLocked]}>
+                <Text style={styles.flowerEmoji}>❓</Text>
+              </View>
+              <Text style={styles.flowerNameLocked}>???</Text>
             </View>
           ))}
         </View>
-      )}
 
-      {CATEGORIES.map(cat => {
-        const catCreatures = CREATURES.filter(c => c.category === cat);
-        const unlockedCount = catCreatures.filter(c => unlockedEmojis.has(c.emoji)).length;
-        return (
-          <View key={cat}>
-            <View style={styles.catHeader}>
-              <Text style={styles.sectionTitle}>{cat}</Text>
-              <Text style={styles.catCount}>{unlockedCount} / {catCreatures.length}</Text>
-            </View>
-            <View style={styles.creatureGrid}>
-              {catCreatures.map((c, i) => {
-                const unlocked = unlockedEmojis.has(c.emoji);
-                return (
-                  <View key={i} style={[styles.creatureCell, !unlocked && styles.locked]}>
-                    <Text style={styles.creatureEmoji}>{unlocked ? c.emoji : '?'}</Text>
-                    {unlocked && (
-                      <Text style={styles.creatureName} numberOfLines={1}>{c.name}</Text>
-                    )}
-                  </View>
-                );
-              })}
-            </View>
+        <Text style={styles.sectionTitle}>CREATURES 🦋</Text>
+        {(!creatureCollection || creatureCollection.length === 0) && (
+          <View style={styles.creaturesHint}>
+            <Text style={styles.creaturesHintText}>Complete a full week to unlock your first creature!</Text>
           </View>
-        );
-      })}
+        )}
 
-      <View style={{ height: 40 }} />
+        <Text style={styles.subSectionTitle}>Insects</Text>
+        <View style={styles.creaturesGrid}>
+          {[...Array(10)].map((_, i) => {
+            const creature = creatureCollection?.find(c => c.category === 'insect' && c.index === i);
+            return (
+              <View key={i} style={[styles.creatureBox, creature && styles.creatureBoxUnlocked]}>
+                <Text style={styles.creatureEmoji}>{creature ? creature.emoji : '?'}</Text>
+              </View>
+            );
+          })}
+        </View>
+
+        <Text style={styles.subSectionTitle}>Birds</Text>
+        <View style={styles.creaturesGrid}>
+          {[...Array(10)].map((_, i) => {
+            const creature = creatureCollection?.find(c => c.category === 'bird' && c.index === i);
+            return (
+              <View key={i} style={[styles.creatureBox, creature && styles.creatureBoxUnlocked]}>
+                <Text style={styles.creatureEmoji}>{creature ? creature.emoji : '?'}</Text>
+              </View>
+            );
+          })}
+        </View>
+
+        <Text style={styles.subSectionTitle}>Animals</Text>
+        <View style={styles.creaturesGrid}>
+          {[...Array(10)].map((_, i) => {
+            const creature = creatureCollection?.find(c => c.category === 'animal' && c.index === i);
+            return (
+              <View key={i} style={[styles.creatureBox, creature && styles.creatureBoxUnlocked]}>
+                <Text style={styles.creatureEmoji}>{creature ? creature.emoji : '?'}</Text>
+              </View>
+            );
+          })}
+        </View>
+
       </ScrollView>
+
       <View style={styles.tabBar}>
-        <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/home')}>
+        <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/')}>
           <Text style={styles.tabIcon}>🏠</Text>
           <Text style={styles.tabLabel}>Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/garden')}>
-          <Text style={styles.tabIcon}>🌸</Text>
-          <Text style={styles.tabLabel}>Garden</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.tabItem}>
           <Text style={styles.tabIcon}>🏅</Text>
           <Text style={[styles.tabLabel, styles.tabLabelActive]}>Album</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/history')}>
+          <Text style={styles.tabIcon}>📊</Text>
+          <Text style={styles.tabLabel}>History</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/settings')}>
+          <Text style={styles.tabIcon}>⚙️</Text>
+          <Text style={styles.tabLabel}>Settings</Text>
+        </TouchableOpacity>
       </View>
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: { flex: 1, backgroundColor: '#FFF8F0' },
+  pageHeader: { backgroundColor: '#FFF8F0', paddingHorizontal: 16, paddingTop: 56, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F0E8DC' },
+  pageTitle: { fontSize: 20, fontWeight: '900', color: '#1A1A1A' },
+  pageSubtitle: { fontSize: 11, color: '#F97316', fontWeight: '600', marginTop: 3 },
   scroll: { flex: 1 },
-  bgDecor: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
-  cloud: { position: 'absolute', backgroundColor: 'white', borderRadius: 99, opacity: 0.85 },
-  sun: { position: 'absolute', top: 32, right: 24, width: 28, height: 28, borderRadius: 14, backgroundColor: '#FFD740', opacity: 0.8 },
-  content: { padding: 20, paddingTop: 60 },
-  heading: { fontSize: 24, fontWeight: '700', color: '#1A237E' },
-  sub: { fontSize: 13, color: '#888', marginBottom: 10 },
-  progressBar: { height: 7, backgroundColor: 'rgba(255,255,255,0.6)', borderRadius: 99, marginBottom: 24, overflow: 'hidden' },
-  progressFill: { height: '100%', backgroundColor: '#FFA726', borderRadius: 99 },
-  sectionTitle: { fontSize: 13, fontWeight: '600', color: '#546E7A', marginBottom: 10, marginTop: 20 },
-  emptyText: { fontSize: 13, color: '#bbb', marginBottom: 16 },
-  flowerRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
-  flowerItem: { alignItems: 'center' },
-  flowerEmoji: { fontSize: 24 },
-  flowerLabel: { fontSize: 8, color: '#aaa', marginTop: 2, textAlign: 'center' },
-  catHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 20, marginBottom: 8 },
-  catCount: { fontSize: 12, color: '#aaa' },
-  creatureGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  creatureCell: { width: '17%', aspectRatio: 1, borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.8)', borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.8)', padding: 4 },
-  locked: { backgroundColor: 'rgba(220,220,220,0.4)' },
-  creatureEmoji: { fontSize: 20 },
-  creatureName: { fontSize: 8, color: '#888', marginTop: 2, textAlign: 'center' },
-  tabBar: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.92)', borderTopWidth: 0.5, borderTopColor: '#E0E0E0', paddingBottom: 20, paddingTop: 8 },
+  scrollContent: { padding: 14, paddingBottom: 30 },
+  sectionTitle: { fontSize: 9, fontWeight: '700', color: '#bbb', letterSpacing: 1, marginBottom: 10, marginTop: 10 },
+  subSectionTitle: { fontSize: 10, fontWeight: '700', color: '#ccc', marginBottom: 6, marginTop: 10 },
+  flowersGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 8 },
+  flowerItem: { alignItems: 'center', width: 60 },
+  flowerBadgeWrap: { position: 'relative' },
+  flowerBox: { width: 52, height: 52, backgroundColor: '#FFF3E0', borderRadius: 14, borderWidth: 1.5, borderColor: '#F97316', alignItems: 'center', justifyContent: 'center' },
+  flowerBoxLocked: { backgroundColor: '#F5F0EA', borderColor: '#E0D8CC', opacity: 0.35 },
+  flowerEmoji: { fontSize: 28 },
+  flowerCount: { position: 'absolute', top: -6, right: -6, backgroundColor: '#F97316', borderRadius: 10, paddingHorizontal: 5, paddingVertical: 1 },
+  flowerCountText: { fontSize: 8, fontWeight: '800', color: 'white' },
+  flowerName: { fontSize: 8, color: '#E65100', fontWeight: '600', marginTop: 4, textAlign: 'center' },
+  flowerNameLocked: { fontSize: 8, color: '#ccc', marginTop: 4 },
+  emptyFlowers: { backgroundColor: '#FFF8F0', borderRadius: 12, padding: 14, width: '100%', marginBottom: 6 },
+  emptyFlowersText: { fontSize: 12, color: '#F97316', fontWeight: '600', textAlign: 'center' },
+  creaturesHint: { backgroundColor: '#FFF8F0', borderRadius: 12, padding: 12, marginBottom: 8 },
+  creaturesHintText: { fontSize: 11, color: '#F97316', fontWeight: '600', textAlign: 'center' },
+  creaturesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  creatureBox: { width: 44, height: 44, backgroundColor: '#F5F0EA', borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  creatureBoxUnlocked: { backgroundColor: '#FFF3E0', borderWidth: 1.5, borderColor: '#F97316' },
+  creatureEmoji: { fontSize: 10, color: '#ccc', fontWeight: '700' },
+  tabBar: { flexDirection: 'row', backgroundColor: 'white', borderTopWidth: 0.5, borderTopColor: '#F0EAE0', paddingBottom: 20, paddingTop: 8 },
   tabItem: { flex: 1, alignItems: 'center' },
   tabIcon: { fontSize: 20, marginBottom: 2 },
-  tabLabel: { fontSize: 10, color: '#B0BEC5', fontWeight: '500' },
-  tabLabelActive: { color: '#FFA726', fontWeight: '700' },
+  tabLabel: { fontSize: 9, color: '#B0BEC5', fontWeight: '600' },
+  tabLabelActive: { color: '#F97316' },
 });

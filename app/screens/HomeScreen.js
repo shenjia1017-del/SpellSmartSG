@@ -1,8 +1,7 @@
 import { useRouter } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -26,10 +25,26 @@ export default function HomeScreen() {
   const [errorMsg, setErrorMsg] = useState('');
   const [weekGroups, setWeekGroups] = useState([]);
   const [selectedWeek, setSelectedWeek] = useState('');
+  const [bloomCount, setBloomCount] = useState(0);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalFlower, setModalFlower] = useState(null);
   const [modalCreature, setModalCreature] = useState(null);
   const [modalTotalFlowers, setModalTotalFlowers] = useState(0);
+
+  const loadBloomCount = useCallback(async (userId, weekLabel) => {
+    if (!userId || !weekLabel) return;
+    try {
+      const { data } = await supabase
+        .from('word_mastery')
+        .select('status')
+        .eq('user_id', userId)
+        .eq('week_label', weekLabel)
+        .eq('status', 'bloom');
+      setBloomCount(data?.length || 0);
+    } catch (e) {
+      console.log('bloomCount error:', e.message);
+    }
+  }, []);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -126,11 +141,20 @@ export default function HomeScreen() {
             .sort((a, b) => b.latestCreatedAt - a.latestCreatedAt);
 
           if (!cancelled) {
+            let nextWeekForBloom = '';
             setWeekGroups(groups);
             setSelectedWeek((prev) => {
-              if (prev && groups.some((g) => g.weekLabel === prev)) return prev;
-              return groups.length > 0 ? groups[0].weekLabel : '';
+              nextWeekForBloom =
+                prev && groups.some((g) => g.weekLabel === prev)
+                  ? prev
+                  : groups.length > 0
+                    ? groups[0].weekLabel
+                    : '';
+              return nextWeekForBloom;
             });
+            if (!cancelled && userId && nextWeekForBloom) {
+              await loadBloomCount(userId, nextWeekForBloom);
+            }
           }
         } catch (e) {
           if (!cancelled) {
@@ -145,8 +169,19 @@ export default function HomeScreen() {
       return () => {
         cancelled = true;
       };
-    }, []),
+    }, [loadBloomCount]),
   );
+
+  useEffect(() => {
+    const loadBloom = async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const uid = sessionData?.session?.user?.id;
+      if (uid && selectedWeek) {
+        await loadBloomCount(uid, selectedWeek);
+      }
+    };
+    loadBloom();
+  }, [selectedWeek, loadBloomCount]);
 
   const selectedGroup = useMemo(
     () => weekGroups.find((g) => g.weekLabel === selectedWeek) ?? null,
@@ -157,34 +192,6 @@ export default function HomeScreen() {
     () => weekGroups.reduce((sum, g) => sum + g.words.length, 0),
     [weekGroups],
   );
-
-  const performDeleteWeek = async (weekLabel) => {
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const userId = sessionData?.session?.user?.id;
-      if (!userId) {
-        setErrorMsg('Please log in to delete.');
-        return;
-      }
-      const { error: wordsError } = await supabase
-        .from('words')
-        .delete()
-        .eq('user_id', userId)
-        .eq('week_label', weekLabel);
-      if (wordsError) throw wordsError;
-      const { error: passagesError } = await supabase
-        .from('passages')
-        .delete()
-        .eq('user_id', userId)
-        .eq('week_label', weekLabel);
-      if (passagesError) throw passagesError;
-      setWeekGroups((prev) => prev.filter((g) => g.weekLabel !== weekLabel));
-      setSelectedWeek((prev) => (prev === weekLabel ? '' : prev));
-      setErrorMsg('');
-    } catch (e) {
-      setErrorMsg(e?.message ?? 'Failed to delete week.');
-    }
-  };
 
   const handleCompleteWeek = async () => {
     try {
@@ -203,28 +210,9 @@ export default function HomeScreen() {
     }
   };
 
-  const confirmDeleteWeek = (group) => {
-    const labelDisplay = group.weekLabel === '' ? '(no label)' : group.weekLabel;
-    const count = group.words.length;
-    Alert.alert(
-      `Delete ${labelDisplay}?`,
-      `This will delete all ${count} words in this week. This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            void performDeleteWeek(group.weekLabel);
-          },
-        },
-      ],
-    );
-  };
-
   return (
     <LinearGradient
-      colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']}
+      colors={['#FFF8F0', '#FFF8F0', '#FFF8F0']}
       style={styles.container}
     >
       <View style={styles.bgDecor} pointerEvents="none">
@@ -241,24 +229,69 @@ export default function HomeScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.mascotContainer}>
-          <LottieView
-            source={require('../../assets/animations/Trilo-5.json')}
-            autoPlay
-            loop
-            style={styles.mascot}
-          />
+        <View style={styles.heroSection}>
+          <View style={styles.heroTopRow}>
+            <View style={styles.weekBadge}>
+              <Text style={styles.weekBadgeText}>
+                {selectedWeek && isValidWeekLabel(selectedWeek) ? selectedWeek.toUpperCase() : 'NO WEEK'}
+              </Text>
+            </View>
+            <Text style={styles.wordCountSmall}>
+              {totalCount > 0 ? `${totalCount} words imported` : 'No words yet'}
+            </Text>
+          </View>
+          <View style={styles.mascotRow}>
+            <LottieView
+              source={require('../../assets/animations/Trilo-5-animated.json')}
+              autoPlay
+              loop
+              style={styles.mascot}
+            />
+            <View style={styles.speechBubble}>
+              <Text style={styles.speechMain}>Ready to learn? 💪</Text>
+              <Text style={styles.speechSub}>
+                {bloomCount > 0 && selectedGroup
+                  ? `${selectedGroup.words.length - bloomCount} more words to bloom!`
+                  : 'Start learning today!'}
+              </Text>
+            </View>
+          </View>
         </View>
 
-        <View style={styles.weekChipRow}>
-          {selectedWeek && isValidWeekLabel(selectedWeek) ? (
-            <View style={styles.weekChip}>
-              <Text style={styles.weekChipText}>{selectedWeek}</Text>
+        <View style={styles.cardsRow}>
+          <View style={styles.infoCard}>
+            <Text style={styles.infoCardTitle}>THIS WEEK&apos;S GOAL</Text>
+            <View style={styles.ringWrap}>
+              <View style={styles.ringOuter}>
+                <View style={styles.ringInner}>
+                  <Text style={styles.ringNum}>
+                    {bloomCount}/{selectedGroup?.words.length ?? 0}
+                  </Text>
+                  <Text style={styles.ringSubText}>mastered</Text>
+                </View>
+              </View>
             </View>
-          ) : null}
-          <Text style={styles.wordCount}>
-            {totalCount > 0 ? `${totalCount} words imported` : 'No words yet'}
-          </Text>
+            <Text style={styles.ringTip}>
+              {selectedGroup && selectedGroup.words.length > 0
+                ? `${Math.round((bloomCount / selectedGroup.words.length) * 100)}% complete`
+                : 'No words yet'}
+            </Text>
+          </View>
+          <View style={styles.infoCard}>
+            <Text style={styles.infoCardTitle}>BLOOMING PROGRESS</Text>
+            <View style={styles.flowersRow}>
+              {selectedGroup && selectedGroup.words.length > 0
+                ? Array.from({ length: Math.min(selectedGroup.words.length, 5) }).map((_, i) => (
+                    <Text key={i} style={styles.flowerEmoji}>
+                      {i < bloomCount ? '🌸' : '🌱'}
+                    </Text>
+                  ))
+                : <Text style={styles.flowerEmoji}>🌱</Text>}
+            </View>
+            <Text style={styles.ringTip}>
+              {bloomCount} of {selectedGroup?.words.length ?? 0} bloomed
+            </Text>
+          </View>
         </View>
 
         {errorMsg ? <Text style={styles.errorText}>{errorMsg}</Text> : null}
@@ -272,37 +305,32 @@ export default function HomeScreen() {
 
         <View style={styles.stepsContainer}>
           <TouchableOpacity
-            style={[styles.stepRow, styles.stepDone]}
+            style={[styles.stepRow, totalCount > 0 && styles.stepRowDone]}
             onPress={() => router.push('/import')}
           >
-            <View style={styles.stepCheck}>
-              <Text style={styles.stepCheckText}>
+            <View style={[styles.stepNum, totalCount > 0 && styles.stepNumDone]}>
+              <Text style={[styles.stepNumText, totalCount > 0 && styles.stepNumTextDone]}>
                 {totalCount > 0 ? '✓' : '1'}
               </Text>
             </View>
+            <Text style={styles.stepIcon}>📷</Text>
             <View style={styles.stepContent}>
               <Text style={styles.stepLabel}>STEP 1</Text>
               <Text style={[styles.stepTitle, totalCount > 0 && styles.stepTitleDone]}>
-                ＋ Import Word List
+                Import / Scan Word List
               </Text>
             </View>
-            {totalCount > 0 && (
-              <Text style={styles.stepDoneText}>Done</Text>
-            )}
+            {totalCount > 0 && <Text style={styles.stepDoneText}>Done</Text>}
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[
               styles.stepMain,
               (!selectedWeek || !selectedGroup || selectedGroup.words.length === 0)
-                && styles.stepMainDisabled
+                && styles.stepMainDisabled,
             ]}
             onPress={() => {
               const selectedWords = selectedGroup?.words ?? [];
-              console.log(
-                '[HomeScreen] words being passed:',
-                JSON.stringify(selectedWords[0]),
-              );
               router.push({
                 pathname: '/learn',
                 params: {
@@ -321,7 +349,7 @@ export default function HomeScreen() {
             style={[
               styles.stepSecondary,
               (!selectedWeek || !selectedGroup || selectedGroup.words.length === 0)
-                && styles.stepSecondaryDisabled
+                && styles.stepSecondaryDisabled,
             ]}
             onPress={() => {
               const weekLabel = selectedGroup?.weekLabel ?? '';
@@ -335,9 +363,9 @@ export default function HomeScreen() {
         </View>
 
         <View style={styles.weekSection}>
-          <Text style={styles.weekSectionTitle}>Available Weeks</Text>
+          <Text style={styles.weekSectionTitle}>RECENTLY IMPORTED</Text>
           {loading ? (
-            <ActivityIndicator color="#FFA726" />
+            <ActivityIndicator color="#F97316" />
           ) : null}
           {!loading && weekGroups.length === 0 ? (
             <Text style={styles.emptyText}>No words imported yet.</Text>
@@ -347,30 +375,25 @@ export default function HomeScreen() {
             .map((group) => {
               const active = group.weekLabel === selectedWeek;
               return (
-                <View
+                <TouchableOpacity
                   key={group.weekLabel}
-                  style={[styles.weekRow, active && styles.weekRowActive]}
+                  style={[styles.weekChipItem, !active && styles.weekChipItemInactive]}
+                  onPress={() => setSelectedWeek(group.weekLabel)}
+                  activeOpacity={0.7}
                 >
-                  <TouchableOpacity
-                    style={styles.weekRowMain}
-                    onPress={() => setSelectedWeek(group.weekLabel)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={[styles.weekRowText, active && styles.weekRowTextActive]}>
-                      {group.weekLabel} — {group.words.length} words
+                  <View style={styles.weekChipLeft}>
+                    <Text style={[styles.weekChipText, !active && styles.weekChipTextInactive]}>
+                      {group.weekLabel}
+                    </Text>
+                    <Text style={styles.weekChipSub}>
+                      {group.words.length} words
                       {group.passages?.length > 0
                         ? ` · ${group.passages.length} passage${group.passages.length > 1 ? 's' : ''}`
                         : ''}
                     </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.weekRowDelete}
-                    onPress={() => confirmDeleteWeek(group)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Text style={styles.weekRowDeleteText}>🗑</Text>
-                  </TouchableOpacity>
-                </View>
+                  </View>
+                  <Text style={[styles.weekChipArrow, !active && styles.weekChipArrowInactive]}>›</Text>
+                </TouchableOpacity>
               );
             })}
         </View>
@@ -390,17 +413,21 @@ export default function HomeScreen() {
       />
 
       <View style={styles.tabBar}>
-        <TouchableOpacity style={styles.tabItem} onPress={() => {}}>
+        <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/')}>
           <Text style={styles.tabIcon}>🏠</Text>
           <Text style={[styles.tabLabel, styles.tabLabelActive]}>Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/garden')}>
-          <Text style={styles.tabIcon}>🌸</Text>
-          <Text style={styles.tabLabel}>Garden</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/album')}>
           <Text style={styles.tabIcon}>🏅</Text>
           <Text style={styles.tabLabel}>Album</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/history')}>
+          <Text style={styles.tabIcon}>📊</Text>
+          <Text style={styles.tabLabel}>History</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/settings')}>
+          <Text style={styles.tabIcon}>⚙️</Text>
+          <Text style={styles.tabLabel}>Settings</Text>
         </TouchableOpacity>
       </View>
     </LinearGradient>
@@ -408,348 +435,119 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
+  container: { flex: 1 },
+  scrollFlex: { flex: 1 },
+  bgDecor: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#FFF8F0' },
+  cloud: { position: 'absolute', backgroundColor: 'white', borderRadius: 99, opacity: 0.85 },
+  sun: { position: 'absolute', top: 32, right: 24, width: 28, height: 28, borderRadius: 14, backgroundColor: '#FFD740', opacity: 0.8 },
+  ground: { position: 'absolute', bottom: 32, left: 0, right: 0, height: 60, backgroundColor: '#C8E6C9', borderTopLeftRadius: 80, borderTopRightRadius: 120, opacity: 0.5 },
+  ground2: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 40, backgroundColor: '#A5D6A7', opacity: 0.45 },
+  scrollContent: { alignItems: 'center', paddingTop: 0, paddingHorizontal: 0, paddingBottom: 40, backgroundColor: '#FFF8F0' },
+
+  heroSection: { width: '100%', backgroundColor: '#FFF8F0', paddingHorizontal: 16, paddingTop: 56, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F0E8DC' },
+  heroTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  weekBadge: { backgroundColor: '#F97316', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 4 },
+  weekBadgeText: { fontSize: 11, fontWeight: '800', color: 'white', letterSpacing: 0.5 },
+  wordCountSmall: { fontSize: 11, color: '#999', fontWeight: '500' },
+  mascotRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  mascot: { width: 110, height: 110 },
+  speechBubble: { flex: 1, backgroundColor: 'white', borderRadius: 16, borderWidth: 1.5, borderColor: '#F0E0CC', padding: 10 },
+  speechMain: { fontSize: 13, fontWeight: '700', color: '#1A1A1A' },
+  speechSub: { fontSize: 10, color: '#999', marginTop: 2 },
+
+  cardsRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingVertical: 10, width: '100%', maxWidth: 420, alignSelf: 'center', backgroundColor: '#FFF8F0' },
+  infoCard: { flex: 1, backgroundColor: '#FFF8F0', borderRadius: 14, padding: 10, borderWidth: 1, borderColor: '#F0E8DC' },
+  infoCardTitle: { fontSize: 9, fontWeight: '700', color: '#C45A10', letterSpacing: 0.5, marginBottom: 8 },
+  ringWrap: { alignItems: 'center' },
+  ringOuter: { width: 64, height: 64, borderRadius: 32, backgroundColor: '#F97316', alignItems: 'center', justifyContent: 'center' },
+  ringInner: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFF8F0', alignItems: 'center', justifyContent: 'center' },
+  ringNum: { fontSize: 13, fontWeight: '800', color: '#1A1A1A' },
+  ringSubText: { fontSize: 7, color: '#999', textAlign: 'center' },
+  ringTip: { fontSize: 9, color: '#999', textAlign: 'center', marginTop: 5 },
+  flowersRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-end', gap: 2, paddingVertical: 4 },
+  flowerEmoji: { fontSize: 18 },
+
+  stepsContainer: { width: '100%', maxWidth: 420, alignSelf: 'center', paddingHorizontal: 14, marginBottom: 20, marginTop: 4 },
+  stepRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, padding: 12, marginBottom: 7, backgroundColor: 'white', borderWidth: 1.5, borderColor: '#F0E8DC', gap: 10 },
+  stepRowDone: { backgroundColor: '#F9FFF9', borderColor: '#C8EDD0' },
+  stepNum: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#F0E8DC', alignItems: 'center', justifyContent: 'center' },
+  stepNumDone: { backgroundColor: '#C8EDD0' },
+  stepNumText: { fontSize: 10, fontWeight: '800', color: '#C45A10' },
+  stepNumTextDone: { color: '#22A050' },
+  stepIcon: { fontSize: 18 },
+  stepContent: { flex: 1 },
+  stepLabel: { fontSize: 8, fontWeight: '700', color: '#bbb', letterSpacing: 0.5, marginBottom: 1 },
+  stepTitle: { fontSize: 13, fontWeight: '700', color: '#222' },
+  stepTitleDone: { color: '#888' },
+  stepDoneText: { fontSize: 11, color: '#22A050', fontWeight: '700' },
+  stepMain: { width: '100%', backgroundColor: '#F97316', borderRadius: 16, paddingVertical: 15, alignItems: 'center', marginBottom: 7, shadowColor: '#F97316', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  stepMainDisabled: { backgroundColor: '#E0E0E0', shadowOpacity: 0, elevation: 0 },
+  stepMainLabel: { fontSize: 8, fontWeight: '700', color: 'rgba(255,255,255,0.7)', letterSpacing: 0.5, marginBottom: 2 },
+  stepMainTitle: { fontSize: 15, fontWeight: '800', color: 'white' },
+  stepSecondary: { width: '100%', backgroundColor: 'white', borderRadius: 16, paddingVertical: 13, alignItems: 'center', marginBottom: 7, borderWidth: 1.5, borderColor: '#F97316' },
+  stepSecondaryDisabled: { borderColor: '#E0E0E0', opacity: 0.5 },
+  stepSecondaryTitle: { fontSize: 14, fontWeight: '700', color: '#E65100' },
+
+  weekSection: { width: '100%', maxWidth: 420, alignSelf: 'center', paddingHorizontal: 14, marginBottom: 12 },
+  weekSectionTitle: { fontSize: 9, fontWeight: '700', color: '#bbb', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 },
+  weekChipItem: {
+    backgroundColor: '#FFF8F0',
+    borderWidth: 1.5,
+    borderColor: '#F97316',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  weekChipItemInactive: {
+    backgroundColor: '#FAFAFA',
+    borderColor: '#E0E0E0',
+  },
+  weekChipLeft: {
     flex: 1,
-  },
-  scrollFlex: {
-    flex: 1,
-  },
-  bgDecor: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  cloud: {
-    position: 'absolute',
-    backgroundColor: 'white',
-    borderRadius: 99,
-    opacity: 0.85,
-  },
-  sun: {
-    position: 'absolute',
-    top: 32,
-    right: 24,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#FFD740',
-    opacity: 0.8,
-  },
-  ground: {
-    position: 'absolute',
-    bottom: 32,
-    left: 0,
-    right: 0,
-    height: 60,
-    backgroundColor: '#C8E6C9',
-    borderTopLeftRadius: 80,
-    borderTopRightRadius: 120,
-    opacity: 0.5,
-  },
-  ground2: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 40,
-    backgroundColor: '#A5D6A7',
-    opacity: 0.45,
-  },
-  scrollContent: {
-    alignItems: 'center',
-    paddingTop: 60,
-    paddingHorizontal: 16,
-    paddingBottom: 40,
-  },
-  mascotContainer: {
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  mascot: {
-    width: 110,
-    height: 110,
-  },
-  weekChipRow: {
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  weekChip: {
-    backgroundColor: '#FFF3E0',
-    borderRadius: 99,
-    paddingHorizontal: 16,
-    paddingVertical: 4,
-    marginBottom: 4,
   },
   weekChipText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#E65100',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  wordCount: {
-    fontSize: 14,
-    color: '#546E7A',
-  },
-  errorText: {
-    color: '#c00',
-    marginBottom: 8,
     fontSize: 13,
-  },
-  emptyState: {
-    alignItems: 'center',
-    marginBottom: 20,
-    paddingHorizontal: 20,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#1A237E',
-    marginBottom: 6,
-  },
-  emptySubtitle: {
-    fontSize: 13,
-    color: '#90A4AE',
-    textAlign: 'center',
-  },
-  stepsContainer: {
-    width: '100%',
-    maxWidth: 420,
-    marginBottom: 20,
-  },
-  stepRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10,
-    backgroundColor: 'rgba(255,255,255,0.8)',
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-  },
-  stepDone: {
-    opacity: 0.85,
-  },
-  stepCheck: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#E8F5E9',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  stepCheckText: {
-    fontSize: 14,
-    color: '#4CAF50',
-    fontWeight: '700',
-  },
-  stepContent: {
-    flex: 1,
-  },
-  stepLabel: {
-    fontSize: 8,
-    fontWeight: '700',
-    color: '#B0BEC5',
-    letterSpacing: 0.8,
-    marginBottom: 2,
-  },
-  stepTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#546E7A',
-  },
-  stepTitleDone: {
-    color: '#90A4AE',
-  },
-  stepDoneText: {
-    fontSize: 11,
-    color: '#4CAF50',
-    fontWeight: '600',
-  },
-  stepMain: {
-    width: '100%',
-    backgroundColor: '#FFA726',
-    borderRadius: 18,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginBottom: 10,
-    shadowColor: '#FFA726',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  stepMainDisabled: {
-    backgroundColor: '#E0E0E0',
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  stepMainLabel: {
-    fontSize: 8,
-    fontWeight: '700',
-    color: '#FFF3E0',
-    letterSpacing: 0.8,
-    marginBottom: 3,
-  },
-  stepMainTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#fff',
-  },
-  stepSecondary: {
-    width: '100%',
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    borderRadius: 16,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginBottom: 10,
-    borderWidth: 1.5,
-    borderColor: '#FFA726',
-  },
-  stepSecondaryDisabled: {
-    borderColor: '#E0E0E0',
-    opacity: 0.5,
-  },
-  stepSecondaryTitle: {
-    fontSize: 14,
     fontWeight: '700',
     color: '#E65100',
   },
-  weekSection: {
-    width: '100%',
-    maxWidth: 420,
-    marginBottom: 12,
+  weekChipTextInactive: {
+    color: '#999',
   },
-  weekSectionTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#90A4AE',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    marginBottom: 8,
-  },
-  weekRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#d8d8d8',
-    borderRadius: 12,
-    paddingVertical: 6,
-    paddingLeft: 12,
-    paddingRight: 6,
-    backgroundColor: 'rgba(255,255,255,0.8)',
-    marginBottom: 6,
-  },
-  weekRowActive: {
-    borderColor: '#FFA726',
-    backgroundColor: '#FFF8F0',
-  },
-  weekRowMain: {
-    flex: 1,
-    paddingVertical: 8,
-    paddingRight: 8,
-  },
-  weekRowDelete: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  weekRowDeleteText: {
-    fontSize: 18,
-    color: '#c00',
-  },
-  weekRowText: {
-    color: '#444',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  weekRowTextActive: {
-    color: '#E65100',
-  },
-  selectedCard: {
-    width: '100%',
-    maxWidth: 420,
-    borderWidth: 1,
-    borderColor: '#e4e4e4',
-    borderRadius: 16,
-    padding: 12,
-    marginTop: 4,
-    backgroundColor: 'rgba(255,255,255,0.85)',
-    flex: 1,
-  },
-  selectedTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#333',
-    marginBottom: 8,
-  },
-  selectedList: {
-    maxHeight: 160,
-  },
-  selectedListContent: {
-    paddingBottom: 10,
-  },
-  wordItem: {
-    fontSize: 15,
-    color: '#444',
-    marginBottom: 8,
-  },
-  emptyInline: {
-    color: '#888',
-    fontSize: 14,
-    marginBottom: 4,
-  },
-  emptyText: {
-    color: '#888',
-    fontSize: 14,
-    textAlign: 'center',
-    paddingVertical: 12,
-  },
-  sectionHeading: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#555',
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-    marginBottom: 10,
+  weekChipSub: {
+    fontSize: 10,
+    color: '#aaa',
     marginTop: 2,
   },
-  sectionHeadingAfterWords: {
-    marginTop: 18,
-  },
-  selectWeekHint: {
-    color: '#666',
-    fontSize: 14,
-    marginTop: -6,
-    marginBottom: 10,
-  },
-  tabBar: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.92)',
-    borderTopWidth: 0.5,
-    borderTopColor: '#E0E0E0',
-    paddingBottom: 20,
-    paddingTop: 8,
-  },
-  tabItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  tabIcon: {
-    fontSize: 20,
-    marginBottom: 2,
-  },
-  tabLabel: {
-    fontSize: 10,
-    color: '#B0BEC5',
-    fontWeight: '500',
-  },
-  tabLabelActive: {
-    color: '#FFA726',
+  weekChipArrow: {
+    fontSize: 18,
+    color: '#F97316',
     fontWeight: '700',
   },
+  weekChipArrowInactive: {
+    color: '#ccc',
+  },
+
+  errorText: { color: '#c00', marginBottom: 8, fontSize: 13 },
+  emptyState: { alignItems: 'center', marginBottom: 20, paddingHorizontal: 20 },
+  emptyTitle: { fontSize: 18, fontWeight: '700', color: '#1A237E', marginBottom: 6 },
+  emptySubtitle: { fontSize: 13, color: '#90A4AE', textAlign: 'center' },
+  emptyText: { color: '#888', fontSize: 14, textAlign: 'center', paddingVertical: 12 },
+  emptyInline: { color: '#888', fontSize: 14, marginBottom: 4 },
+  selectedCard: { width: '100%', maxWidth: 420, borderWidth: 1, borderColor: '#e4e4e4', borderRadius: 16, padding: 12, marginTop: 4, backgroundColor: 'rgba(255,255,255,0.85)', flex: 1 },
+  selectedTitle: { fontSize: 16, fontWeight: '700', color: '#333', marginBottom: 8 },
+  selectedList: { maxHeight: 160 },
+  selectedListContent: { paddingBottom: 10 },
+  wordItem: { fontSize: 15, color: '#444', marginBottom: 8 },
+  sectionHeading: { fontSize: 14, fontWeight: '800', color: '#555', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 10, marginTop: 2 },
+  sectionHeadingAfterWords: { marginTop: 18 },
+  selectWeekHint: { color: '#666', fontSize: 14, marginTop: -6, marginBottom: 10 },
+
+  tabBar: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.95)', borderTopWidth: 0.5, borderTopColor: '#E0E0E0', paddingBottom: 20, paddingTop: 8 },
+  tabItem: { flex: 1, alignItems: 'center' },
+  tabIcon: { fontSize: 20, marginBottom: 2 },
+  tabLabel: { fontSize: 10, color: '#B0BEC5', fontWeight: '500' },
+  tabLabelActive: { color: '#F97316', fontWeight: '700' },
 });

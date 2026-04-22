@@ -45,13 +45,17 @@ export default function ImportScreen() {
 
   const [savedWords, setSavedWords] = useState([]);
   const [photoUri, setPhotoUri] = useState('');
-  // Camera queue: photos added first, processed only when user taps "Process All Photos".
-  const [photoQueue, setPhotoQueue] = useState([]);
   const [pdfPreviewName, setPdfPreviewName] = useState('');
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractedWords, setExtractedWords] = useState([]);
   const [extractedPassage, setExtractedPassage] = useState('');
+  const [extractedWeekGroups, setExtractedWeekGroups] = useState([]);
+  const [selectedWeekGroupLabel, setSelectedWeekGroupLabel] = useState('');
+  const [editingWeekGroupIndex, setEditingWeekGroupIndex] = useState(-1);
+  const [editingWeekGroupLabel, setEditingWeekGroupLabel] = useState('');
+  const [manualWordToAdd, setManualWordToAdd] = useState('');
   const [weekLabel, setWeekLabel] = useState('');
+  const [existingWeekLabels, setExistingWeekLabels] = useState([]);
   const [saveSuccess, setSaveSuccess] = useState(null);
 
   const openAIApiKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
@@ -113,7 +117,7 @@ export default function ImportScreen() {
   };
 
   const parseOcrFromOpenAIContent = (content) => {
-    const empty = { words: [], passage: '' };
+    const empty = { words: [], passage: '', weekGroups: [] };
 
     const fromObject = (parsed) => {
       if (!parsed || typeof parsed !== 'object') return empty;
@@ -129,13 +133,22 @@ export default function ImportScreen() {
             ? parsed.dictation_passage
             : '';
       const passage = passageRaw.trim();
-      return { words, passage };
+      const weekGroups = Array.isArray(parsed.weekGroups)
+        ? parsed.weekGroups
+            .map((group) => {
+              const weekLabel = String(group?.weekLabel ?? '').trim();
+              const groupWords = normalizeWords(Array.isArray(group?.words) ? group.words : []);
+              return { weekLabel, words: groupWords };
+            })
+            .filter((group) => group.weekLabel && group.words.length > 0)
+        : [];
+      return { words, passage, weekGroups };
     };
 
     try {
       const parsed = JSON.parse(content);
       const result = fromObject(parsed);
-      if (result.words.length || result.passage) return result;
+      if (result.words.length || result.passage || result.weekGroups.length) return result;
     } catch {
       // continue
     }
@@ -145,7 +158,7 @@ export default function ImportScreen() {
       try {
         const parsed = JSON.parse(jsonMatch[0]);
         const result = fromObject(parsed);
-        if (result.words.length || result.passage) return result;
+        if (result.words.length || result.passage || result.weekGroups.length) return result;
       } catch {
         // ignore
       }
@@ -159,6 +172,7 @@ export default function ImportScreen() {
           .filter(Boolean),
       ),
       passage: '',
+      weekGroups: [],
     };
   };
 
@@ -178,11 +192,37 @@ export default function ImportScreen() {
     }
   };
 
-  const WORKSHEET_SYSTEM_PROMPT =
-    'You read photos of primary-school spelling worksheets. Separate two kinds of text and return ONLY valid JSON with this exact shape: {"words":["..."],"passage":"..."}. ' +
-    '(1) words: numbered spelling list items only — each numbered line is one string entry; preserve full phrases exactly as printed (e.g. "round the corner"); do not split multi-word phrases; strip leading numbers/bullets from the stored text only; dedupe; omit empty strings. ' +
-    '(2) passage: the dictation paragraph(s) or continuous prose block(s) for reading/dictation — NOT the numbered list. If there is no dictation passage, use an empty string "". ' +
-    'Keep original spelling and casing from the source. No markdown, no explanation outside JSON.';
+  const loadExistingWeekLabels = async () => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData?.session?.user?.id;
+      if (!userId) {
+        setExistingWeekLabels([]);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('words')
+        .select('week_label')
+        .eq('user_id', userId)
+        .not('week_label', 'is', null);
+      if (error) throw error;
+      const seen = new Set();
+      const labels = [];
+      for (const row of Array.isArray(data) ? data : []) {
+        const label = String(row?.week_label ?? '').trim();
+        if (!label) continue;
+        const key = label.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        labels.push(label);
+      }
+      setExistingWeekLabels(labels);
+    } catch {
+      setExistingWeekLabels([]);
+    }
+  };
+
+  const WORKSHEET_SYSTEM_PROMPT = 'You are reading a photo of a Singapore primary school spelling worksheet. Return ONLY valid JSON with this exact shape: {"words":["..."],"passage":"","weekGroups":[]} No markdown, no explanation outside JSON. == STEP 1: Classify the page == Look at the overall structure. TYPE A - SPELLING LIST: Numbered sentences (1. 2. 3...) where each sentence contains one underlined or bold target word or phrase. Each sentence is independent. This is NOT a dictation passage. TYPE B - DICTATION PASSAGE: A block of continuous prose telling a story or describing a scene, with no item numbers, flowing as connected paragraphs. Usually under a heading like Dictation or Week __ Dictation. TYPE C - WORD COLUMN LIST: A table where words or phrases are listed in their own dedicated left column, separate from example sentences on the right. TYPE D - MULTI-WEEK GRID: A grid with multiple week columns (Week 1, Week 2...) each containing a list of words. == STEP 2: Extract spelling words == For TYPE A: extract ONLY the underlined or bold target word or phrase from each numbered sentence, and always extract the COMPLETE underlined span. If the underline covers multiple words, extract all of them as one phrase (e.g. "visit our relatives", "Mother whispered softly into my ear"), never only part of an underlined phrase. If entire sentence is underlined extract whole sentence as one phrase. Do NOT extract surrounding sentence words. Do NOT put TYPE A sentences into passage field. For TYPE C: extract ONLY from the dedicated word column. Preserve full multi-line phrases as one entry (e.g. scrambled up the ladder, approached with caution, punching the air with delight). Do NOT extract from example sentences column. Do NOT extract from any dictation passage. For TYPE D: put empty array in words and fill weekGroups as array of objects like [{"weekLabel":"Week 1","words":["bridge","mountains"]},{"weekLabel":"Week 2","words":["first","second"]}]. Day names (Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday) are valid spelling words and must be extracted normally; do not treat them as headers or skip them. Include them in the words array for their respective week group. == STEP 3: Extract dictation passage == Only TYPE B content goes into passage. Extract the COMPLETE prose block as one string. TYPE A numbered sentences are NOT a dictation passage even if they look like sentences. If no TYPE B content exists on this page, passage must be empty string. Never put numbered example sentences into passage. == STEP 4: Deduplicate == Remove duplicate words case-insensitively. Keep original spelling and casing.';
 
   const fetchOpenAIVisionOcr = async (base64, mimeType = 'image/jpeg') => {
     if (!openAIApiKey) {
@@ -286,6 +326,8 @@ export default function ImportScreen() {
     setPdfPreviewName('');
     setPhotoUri(previewUri ?? '');
     setExtractedPassage('');
+    setExtractedWeekGroups([]);
+    setSelectedWeekGroupLabel('');
     setErrorMsg(null);
     setIsExtracting(true);
     try {
@@ -294,10 +336,16 @@ export default function ImportScreen() {
       console.log('OCR result:', JSON.stringify(result));
       const words = Array.isArray(result?.words) ? result.words : [];
       const passage = typeof result?.passage === 'string' ? result.passage : '';
-      console.log('Setting words:', words);
-      setExtractedWords(words);
+      const weekGroups = Array.isArray(result?.weekGroups) ? result.weekGroups : [];
+      const singleWeekWords = weekGroups.length === 1 && Array.isArray(weekGroups[0]?.words)
+        ? weekGroups[0].words
+        : null;
+      console.log('Setting words:', singleWeekWords ?? words);
+      setExtractedWords(singleWeekWords ?? words);
       setExtractedPassage(passage);
-      if (!words.length && !passage.trim()) {
+      setExtractedWeekGroups(weekGroups);
+      setSelectedWeekGroupLabel(weekGroups.length === 1 ? String(weekGroups[0]?.weekLabel ?? '') : '');
+      if (!words.length && !passage.trim() && !weekGroups.length) {
         setErrorMsg('No spelling list or dictation passage was detected. Please try another photo.');
       } else {
         scheduleScrollToReviewSection();
@@ -313,6 +361,8 @@ export default function ImportScreen() {
     setPdfPreviewName(displayName);
     setPhotoUri('');
     setExtractedPassage('');
+    setExtractedWeekGroups([]);
+    setSelectedWeekGroupLabel('');
     setErrorMsg(null);
     setIsExtracting(true);
     try {
@@ -333,11 +383,17 @@ export default function ImportScreen() {
 
       const pdfWords = Array.isArray(parsed?.words) ? parsed.words : [];
       const pdfPassage = typeof parsed?.passage === 'string' ? parsed.passage : '';
+      const pdfWeekGroups = Array.isArray(parsed?.weekGroups) ? parsed.weekGroups : [];
+      const singleWeekWords = pdfWeekGroups.length === 1 && Array.isArray(pdfWeekGroups[0]?.words)
+        ? pdfWeekGroups[0].words
+        : null;
       console.log('OCR result:', JSON.stringify({ words: pdfWords, passage: pdfPassage }));
-      console.log('Setting words:', pdfWords);
-      setExtractedWords(pdfWords);
+      console.log('Setting words:', singleWeekWords ?? pdfWords);
+      setExtractedWords(singleWeekWords ?? pdfWords);
       setExtractedPassage(pdfPassage);
-      if (!pdfWords.length && !pdfPassage.trim()) {
+      setExtractedWeekGroups(pdfWeekGroups);
+      setSelectedWeekGroupLabel(pdfWeekGroups.length === 1 ? String(pdfWeekGroups[0]?.weekLabel ?? '') : '');
+      if (!pdfWords.length && !pdfPassage.trim() && !pdfWeekGroups.length) {
         setErrorMsg('No spelling list or dictation passage was detected in the PDF.');
       } else {
         scheduleScrollToReviewSection();
@@ -380,60 +436,6 @@ export default function ImportScreen() {
     await runVisionOcrPipeline(base64, mime, uri ?? '');
   };
 
-  const processPhotoQueueWithOCR = async () => {
-    if (!photoQueue?.length) return;
-    setErrorMsg(null);
-    setIsExtracting(true);
-    setPdfPreviewName('');
-    setPhotoUri(photoQueue?.[0]?.uri ?? '');
-    setExtractedPassage('');
-    setExtractedWords([]);
-    try {
-      const allWordsRaw = [];
-      const passages = [];
-
-      for (const photo of photoQueue) {
-        if (!photo?.uri) continue;
-        let base64 = photo.base64;
-        if (!base64) {
-          try {
-            base64 = await FileSystem.readAsStringAsync(photo.uri, {
-              encoding: FileSystem.EncodingType.Base64,
-            });
-          } catch {
-            // Skip photos that can't be read as base64.
-            continue;
-          }
-        }
-        if (!base64) continue;
-
-        let mimeType = photo.mimeType;
-        if (!mimeType || !String(mimeType).startsWith('image/')) mimeType = 'image/jpeg';
-
-        await waitOcrRateLimit();
-        const result = await fetchOpenAIVisionOcr(base64, mimeType);
-        if (Array.isArray(result?.words)) allWordsRaw.push(...result.words);
-        if (typeof result?.passage === 'string' && result.passage.trim()) passages.push(result.passage.trim());
-      }
-
-      const mergedWords = normalizeWords(allWordsRaw);
-      const mergedPassage = passages.join('\n\n').trim();
-
-      setExtractedWords(mergedWords);
-      setExtractedPassage(mergedPassage);
-
-      if (!mergedWords.length && !mergedPassage) {
-        setErrorMsg('No spelling list or dictation passage was detected. Please try another photo.');
-      } else {
-        scheduleScrollToReviewSection();
-      }
-    } catch (e) {
-      setErrorMsg(e?.message ?? 'Failed to extract content from photos.');
-    } finally {
-      setIsExtracting(false);
-    }
-  };
-
   const onTakePhoto = async () => {
     setErrorMsg(null);
     setSaveSuccess(null);
@@ -460,19 +462,10 @@ export default function ImportScreen() {
         return;
       }
 
-      // Queue it; do not OCR yet.
-      setPdfPreviewName('');
-      setPhotoUri('');
-      setExtractedWords([]);
-      setExtractedPassage('');
-      setPhotoQueue((prev) => [
-        ...prev,
-        {
-          uri: asset.uri,
-          base64: asset.base64,
-          mimeType: 'image/jpeg',
-        },
-      ]);
+      await processImageWithOCR(asset.uri, {
+        base64: asset.base64,
+        mimeType: 'image/jpeg',
+      });
     } catch (e) {
       setErrorMsg(e?.message ?? 'Failed to open camera.');
     }
@@ -491,35 +484,23 @@ export default function ImportScreen() {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsMultipleSelection: true,
+        allowsMultipleSelection: false,
         quality: 0.8,
         base64: true,
       });
 
       if (result.canceled) return;
 
-      const assets = Array.isArray(result.assets) ? result.assets : [];
-      const queuedPhotos = assets
-        .filter((asset) => Boolean(asset?.uri))
-        .map((asset) => ({
-          uri: asset.uri,
-          base64: asset.base64,
-          mimeType:
-            asset.mimeType && String(asset.mimeType).startsWith('image/')
-              ? asset.mimeType
-              : 'image/jpeg',
-        }));
-
-      if (!queuedPhotos.length) {
+      const asset = result.assets?.[0];
+      if (!asset?.uri) {
         setErrorMsg('Could not read image data from the photo.');
         return;
       }
-
-      setPdfPreviewName('');
-      setPhotoUri('');
-      setExtractedWords([]);
-      setExtractedPassage('');
-      setPhotoQueue((prev) => [...prev, ...queuedPhotos]);
+      const mimeType =
+        asset.mimeType && String(asset.mimeType).startsWith('image/')
+          ? asset.mimeType
+          : 'image/jpeg';
+      await processImageWithOCR(asset.uri, { base64: asset.base64, mimeType });
     } catch (e) {
       setErrorMsg(e?.message ?? 'Failed to open photo library.');
     }
@@ -572,6 +553,32 @@ export default function ImportScreen() {
 
   const onDeleteExtractedWord = (index) => {
     setExtractedWords((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const onAddManualExtractedWord = () => {
+    const next = String(manualWordToAdd ?? '').trim();
+    if (!next) return;
+    setExtractedWords((prev) => [...prev, next]);
+    setManualWordToAdd('');
+  };
+
+  const onConfirmWeekGroupLabelEdit = (index) => {
+    const nextLabel = String(editingWeekGroupLabel ?? '').trim();
+    if (!nextLabel) {
+      setEditingWeekGroupIndex(-1);
+      setEditingWeekGroupLabel('');
+      return;
+    }
+    setExtractedWeekGroups((prev) => {
+      const current = Array.isArray(prev) ? prev : [];
+      return current.map((group, i) => (i === index ? { ...group, weekLabel: nextLabel } : group));
+    });
+    if (selectedWeekGroupLabel === String(extractedWeekGroups[index]?.weekLabel ?? '')) {
+      setSelectedWeekGroupLabel(nextLabel);
+    }
+    setWeekLabel(nextLabel);
+    setEditingWeekGroupIndex(-1);
+    setEditingWeekGroupLabel('');
   };
 
   const onSaveOcrReview = async () => {
@@ -655,6 +662,16 @@ export default function ImportScreen() {
     if (showManual) loadSavedWords();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showManual]);
+
+  useEffect(() => {
+    const hasReviewData =
+      extractedWords.length > 0 ||
+      extractedPassage.trim().length > 0 ||
+      extractedWeekGroups.length > 0 ||
+      showManual;
+    if (!hasReviewData) return;
+    loadExistingWeekLabels();
+  }, [extractedWords.length, extractedPassage, extractedWeekGroups.length, showManual]);
 
   const onSaveWord = async () => {
     const trimmed = wordInput.trim();
@@ -750,46 +767,6 @@ export default function ImportScreen() {
             <Text style={styles.importArrow}>›</Text>
           </TouchableOpacity>
 
-      {photoQueue.length > 0 ? (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.photoStrip}
-          contentContainerStyle={styles.photoStripContent}
-          keyboardShouldPersistTaps="handled"
-        >
-          {photoQueue.map((p, idx) => (
-            <View key={`${p.uri}-${idx}`} style={styles.thumbWrap}>
-              <Image source={{ uri: p.uri }} style={styles.thumbImage} />
-            </View>
-          ))}
-        </ScrollView>
-      ) : null}
-
-      {photoQueue.length > 0 ? (
-        <>
-          <TouchableOpacity
-            style={styles.button}
-            onPress={onTakePhoto}
-            disabled={isExtracting}
-          >
-            <Text style={styles.buttonText}>＋ Add Another Photo</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.button, styles.secondButton]}
-            onPress={processPhotoQueueWithOCR}
-            disabled={isExtracting}
-          >
-            {isExtracting ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.buttonText}>✅ Process All Photos</Text>
-            )}
-          </TouchableOpacity>
-        </>
-      ) : null}
-
       {isExtracting ? (
         <View style={styles.processingBox}>
           <ActivityIndicator />
@@ -808,11 +785,40 @@ export default function ImportScreen() {
         </View>
       ) : null}
 
-      {extractedWords.length > 0 || extractedPassage.trim().length > 0 || showManual ? (
+      {extractedWords.length > 0 || extractedPassage.trim().length > 0 || extractedWeekGroups.length > 0 || showManual ? (
         <View style={styles.extractedSection} onLayout={onReviewSectionLayout}>
           <Text style={styles.manualTitle}>Review before saving</Text>
 
           <Text style={styles.sectionLabel}>Week label</Text>
+          {existingWeekLabels.length > 0 ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.weekChipsRow}
+              contentContainerStyle={styles.weekChipsContent}
+              keyboardShouldPersistTaps="handled"
+            >
+              {existingWeekLabels.map((label) => (
+                <TouchableOpacity
+                  key={`week-chip-${label}`}
+                  style={[
+                    styles.weekChip,
+                    weekLabel.trim().toLowerCase() === label.toLowerCase() && styles.weekChipActive,
+                  ]}
+                  onPress={() => setWeekLabel(label)}
+                >
+                  <Text
+                    style={[
+                      styles.weekChipText,
+                      weekLabel.trim().toLowerCase() === label.toLowerCase() && styles.weekChipTextActive,
+                    ]}
+                  >
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          ) : null}
           <TextInput
             style={styles.input}
             value={weekLabel}
@@ -821,6 +827,80 @@ export default function ImportScreen() {
           />
 
           <Text style={styles.sectionLabel}>Spelling words & phrases</Text>
+          {extractedWeekGroups.length > 1 ? (
+            <View style={styles.weekGroupSelectorWrap}>
+              <Text style={styles.hintText}>This page has multiple weeks — tap the week you need:</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.weekChipsRow}
+                contentContainerStyle={styles.weekChipsContent}
+                keyboardShouldPersistTaps="handled"
+              >
+                {extractedWeekGroups.map((group, index) => (
+                  <TouchableOpacity
+                    key={`ocr-week-group-${index}`}
+                    style={[
+                      styles.weekGroupChip,
+                      selectedWeekGroupLabel === group.weekLabel && styles.weekGroupChipActive,
+                    ]}
+                    onPress={() => {
+                      setSelectedWeekGroupLabel(group.weekLabel);
+                      setWeekLabel(group.weekLabel);
+                      setExtractedWords(Array.isArray(group.words) ? group.words : []);
+                    }}
+                  >
+                    {editingWeekGroupIndex === index ? (
+                      <View style={styles.weekGroupEditRow}>
+                        <TextInput
+                          style={styles.weekGroupEditInput}
+                          value={editingWeekGroupLabel}
+                          onChangeText={setEditingWeekGroupLabel}
+                          autoFocus
+                          onSubmitEditing={() => onConfirmWeekGroupLabelEdit(index)}
+                          onBlur={() => onConfirmWeekGroupLabelEdit(index)}
+                          returnKeyType="done"
+                        />
+                        <TouchableOpacity
+                          onPress={() => onConfirmWeekGroupLabelEdit(index)}
+                          style={styles.weekGroupDoneBtn}
+                        >
+                          <Text style={styles.weekGroupDoneBtnText}>Done</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <View style={styles.weekGroupLabelRow}>
+                        <Text
+                          style={[
+                            styles.weekGroupChipText,
+                            selectedWeekGroupLabel === group.weekLabel && styles.weekGroupChipTextActive,
+                          ]}
+                        >
+                          {group.weekLabel}
+                        </Text>
+                        <TouchableOpacity
+                          onPress={() => {
+                            setEditingWeekGroupIndex(index);
+                            setEditingWeekGroupLabel(String(group.weekLabel ?? ''));
+                          }}
+                          style={styles.weekGroupEditIconBtn}
+                        >
+                          <Text
+                            style={[
+                              styles.weekGroupEditIcon,
+                              selectedWeekGroupLabel === group.weekLabel && styles.weekGroupChipTextActive,
+                            ]}
+                          >
+                            ✏️
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          ) : null}
           {extractedWords.length ? (
             extractedWords.map((word, index) => (
               <View key={`extracted-${index}`} style={styles.extractedRow}>
@@ -842,6 +922,20 @@ export default function ImportScreen() {
           ) : (
             <Text style={styles.hintText}>No list items detected — you can add words manually below or retake the photo.</Text>
           )}
+
+          <View style={styles.addWordRow}>
+            <TextInput
+              style={[styles.input, styles.addWordInput]}
+              value={manualWordToAdd}
+              autoCapitalize="none"
+              autoCorrect={false}
+              placeholder="Add a missing word or phrase"
+              onChangeText={setManualWordToAdd}
+            />
+            <TouchableOpacity style={styles.addWordButton} onPress={onAddManualExtractedWord}>
+              <Text style={styles.addWordButtonText}>Add</Text>
+            </TouchableOpacity>
+          </View>
 
           <Text style={styles.sectionLabel}>Dictation passage (sentences)</Text>
           <Text style={styles.hintText}>
@@ -1046,49 +1140,6 @@ const styles = StyleSheet.create({
   tabIcon: { fontSize: 20, marginBottom: 2 },
   tabLabel: { fontSize: 9, color: '#B0BEC5', fontWeight: '600' },
 
-  button: {
-    backgroundColor: '#FFA726',
-    paddingHorizontal: 40,
-    paddingVertical: 15,
-    borderRadius: 25,
-    marginBottom: 15,
-    width: 250,
-    alignSelf: 'center',
-    alignItems: 'center',
-  },
-  secondButton: {
-    backgroundColor: '#66BB6A',
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  photoStrip: {
-    width: '100%',
-    marginTop: 10,
-    marginBottom: 10,
-  },
-  photoStripContent: {
-    paddingHorizontal: 16,
-    alignItems: 'center',
-    gap: 12,
-  },
-  thumbWrap: {
-    width: 64,
-    height: 64,
-    borderRadius: 10,
-    backgroundColor: '#f4f4f4',
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#e4e4e4',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  thumbImage: {
-    width: '100%',
-    height: '100%',
-  },
   manualSection: {
     marginTop: 25,
     width: '100%',
@@ -1114,6 +1165,95 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: 12,
   },
+  weekChipsRow: {
+    marginBottom: 10,
+  },
+  weekChipsContent: {
+    gap: 8,
+    paddingRight: 8,
+  },
+  weekChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#F0E8DC',
+    backgroundColor: '#fff',
+  },
+  weekChipActive: {
+    borderColor: '#F97316',
+    backgroundColor: '#FFF3E0',
+  },
+  weekChipText: {
+    color: '#666',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  weekChipTextActive: {
+    color: '#F97316',
+  },
+  weekGroupSelectorWrap: {
+    marginBottom: 6,
+  },
+  weekGroupChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#F97316',
+    backgroundColor: '#FFF3E0',
+  },
+  weekGroupChipActive: {
+    backgroundColor: '#F97316',
+  },
+  weekGroupChipText: {
+    color: '#F97316',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  weekGroupChipTextActive: {
+    color: '#fff',
+  },
+  weekGroupLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  weekGroupEditIconBtn: {
+    paddingHorizontal: 2,
+    paddingVertical: 1,
+  },
+  weekGroupEditIcon: {
+    color: '#F97316',
+    fontSize: 12,
+  },
+  weekGroupEditRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  weekGroupEditInput: {
+    minWidth: 80,
+    borderWidth: 1,
+    borderColor: '#F0E8DC',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    fontSize: 13,
+    color: '#333',
+    backgroundColor: '#fff',
+  },
+  weekGroupDoneBtn: {
+    backgroundColor: '#F97316',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  weekGroupDoneBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   passageInput: {
     minHeight: 120,
     marginBottom: 12,
@@ -1127,6 +1267,29 @@ const styles = StyleSheet.create({
   extractedInput: {
     flex: 1,
     marginBottom: 0,
+  },
+  addWordRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  addWordInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  addWordButton: {
+    backgroundColor: '#F97316',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addWordButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
   },
   deleteWordButton: {
     backgroundColor: '#f1f1f1',

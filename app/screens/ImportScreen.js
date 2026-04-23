@@ -228,7 +228,7 @@ export default function ImportScreen() {
     }
   };
 
-  const WORKSHEET_SYSTEM_PROMPT = 'You are reading a photo of a Singapore primary school spelling worksheet. Return ONLY valid JSON with this exact shape: {"words":["..."],"passage":"","weekGroups":[]} No markdown, no explanation outside JSON. == STEP 1: Classify the page == Look at the overall structure. TYPE A - SPELLING LIST: Numbered sentences (1. 2. 3...) where each sentence contains one underlined or bold target word or phrase. Each sentence is independent. This is NOT a dictation passage. TYPE B - DICTATION PASSAGE: A block of continuous prose telling a story or describing a scene, with no item numbers, flowing as connected paragraphs. Usually under a heading like Dictation or Week __ Dictation. TYPE C - WORD COLUMN LIST: A table where words or phrases are listed in their own dedicated left column, separate from example sentences on the right. TYPE D - MULTI-WEEK GRID: A grid with multiple week columns (Week 1, Week 2...) each containing a list of words. == STEP 2: Extract spelling words == For TYPE A: extract ONLY the underlined or bold target word or phrase from each numbered sentence, and always extract the COMPLETE underlined span. If the underline covers multiple words, extract all of them as one phrase (e.g. "visit our relatives", "Mother whispered softly into my ear"), never only part of an underlined phrase. If entire sentence is underlined extract whole sentence as one phrase. Do NOT extract surrounding sentence words. Do NOT put TYPE A sentences into passage field. For TYPE C: extract ONLY from the dedicated word column. Preserve full multi-line phrases as one entry (e.g. scrambled up the ladder, approached with caution, punching the air with delight). Do NOT extract from example sentences column. Do NOT extract from any dictation passage. For TYPE D: put empty array in words and fill weekGroups as array of objects like [{"weekLabel":"Week 1","words":["bridge","mountains"]},{"weekLabel":"Week 2","words":["first","second"]}]. Day names (Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday) are valid spelling words and must be extracted normally; do not treat them as headers or skip them. Include them in the words array for their respective week group. == STEP 3: Extract dictation passage == Only TYPE B content goes into passage. Extract the COMPLETE prose block as one string. TYPE A numbered sentences are NOT a dictation passage even if they look like sentences. If no TYPE B content exists on this page, passage must be empty string. Never put numbered example sentences into passage. == STEP 4: Deduplicate == Remove duplicate words case-insensitively. Keep original spelling and casing.';
+  const WORKSHEET_SYSTEM_PROMPT = 'You are reading a photo of a Singapore primary school spelling worksheet. Return ONLY valid JSON with this exact shape: {"words":["..."],"passage":"","weekGroups":[]} No markdown, no explanation outside JSON. == STEP 0: Split the page into two zones == BEFORE extracting anything, mentally divide the page into: ZONE 1 (SPELLING ZONE): the top portion containing numbered items (1. 2. 3...) or a word column with example sentences. ZONE 2 (PASSAGE ZONE): the bottom portion under a heading like "Dictation", "Week __ Dictation", or a continuous prose block with no item numbers. The boundary between the two zones is usually marked by the "Dictation" heading or a clear visual separator. Words go ONLY from ZONE 1. Passage goes ONLY from ZONE 2. == STEP 1: Classify ZONE 1 structure == TYPE A - NUMBERED SENTENCES: ZONE 1 has numbered sentences where each contains one underlined or bold target word/phrase. TYPE C - WORD COLUMN LIST: ZONE 1 has a dedicated left column of words/phrases separate from example sentences on the right. TYPE D - MULTI-WEEK GRID: ZONE 1 is a grid with multiple week columns (Week 1, Week 2...) each containing words. == STEP 2: Extract spelling words from ZONE 1 ONLY == ABSOLUTE RULE: Words/phrases from ZONE 2 (the passage) are FORBIDDEN from entering the words array, even if they appear underlined, highlighted in yellow/green, or bold. Highlighter marks in the passage are for emphasis during dictation, NOT spelling targets. For TYPE A: extract ONLY the underlined or bold target word/phrase from each numbered sentence. Always extract the COMPLETE underlined span. If the underline covers multiple words, extract all as one phrase (e.g. "visit our relatives", "Mother whispered softly into my ear"), never only part. If entire sentence is underlined, extract whole sentence as one phrase. Do NOT extract surrounding sentence words. Do NOT put TYPE A sentences into passage. For TYPE C: extract ONLY from the dedicated word column. Preserve full multi-line phrases as one entry (e.g. scrambled up the ladder, approached with caution). Do NOT extract from example sentences column. For TYPE D: put empty array in words and fill weekGroups as array of objects like [{"weekLabel":"Week 1","words":["bridge","mountains"]},{"weekLabel":"Week 2","words":["first","second"]}]. Day names (Monday-Sunday) are valid spelling words; include them normally. == STEP 3: Extract dictation passage from ZONE 2 ONLY == CRITICAL: First locate the "Dictation" or "Week __ Dictation" heading. Start passage extraction from the VERY FIRST sentence IMMEDIATELY AFTER that heading. The first sentence after "Dictation" is often a quoted sentence (e.g. "This is beautiful," I thought out loud.) — this quoted sentence is ALWAYS the first sentence of the passage, never treat it as a caption or annotation. Do NOT skip it. Extract the COMPLETE prose block as one string, from the first sentence after the heading all the way to the last sentence before any footer/quote/decorative element. Handwritten notes in the margins are NOT part of the passage — ignore them. Before returning, verify: (a) does the passage start with the very first sentence after "Dictation"? (b) have you included the opening quoted sentence if there is one? If no ZONE 2 exists, passage must be empty string. TYPE A numbered sentences are NOT a dictation passage. == STEP 4: Final validation == Remove duplicate words case-insensitively. Keep original spelling and casing. Double-check: no word in the words array comes from the passage zone. If you find any, remove them.';
 
   const fetchOpenAIVisionOcr = async (base64, mimeType = 'image/jpeg') => {
     if (!openAIApiKey) {
@@ -623,9 +623,35 @@ export default function ImportScreen() {
         return;
       }
 
-      let insertedWordRows = [];
+      let wordsToInsert = confirmedWords;
       if (confirmedWords.length) {
-        const rows = confirmedWords.map((word) => ({
+        const { data: existingWords, error: fetchError } = await supabase
+          .from('words')
+          .select('word')
+          .eq('user_id', userId)
+          .eq('child_id', currentChild.id)
+          .eq('week_label', wl);
+        
+        if (fetchError) {
+          console.log('Error fetching existing words:', fetchError);
+          throw fetchError;
+        }
+        
+        const existingLowercase = new Set(
+          (existingWords || []).map(w => w.word.toLowerCase().trim())
+        );
+        
+        wordsToInsert = confirmedWords.filter(
+          w => !existingLowercase.has(w.toLowerCase().trim())
+        );
+        
+        console.log(`[ImportScreen] Existing words in this week: ${existingLowercase.size}`);
+        console.log(`[ImportScreen] New words to insert: ${wordsToInsert.length} (filtered from ${confirmedWords.length})`);
+      }
+
+      let insertedWordRows = [];
+      if (wordsToInsert.length) {
+        const rows = wordsToInsert.map((word) => ({
           word,
           user_id: userId,
           child_id: currentChild.id,
@@ -640,24 +666,61 @@ export default function ImportScreen() {
       }
 
       if (passageText) {
-        console.log('[ImportScreen] Calling passages.insert with body, user_id, week_label (same wl as words).');
-        const { error: passageError } = await supabase.from('passages').insert({
-          body: passageText,
-          user_id: userId,
-          child_id: currentChild.id,
-          week_label: wl,
-        });
-        if (passageError) {
-          console.log('Passage save error:', passageError);
-          throw passageError;
+        console.log('[ImportScreen] Checking for existing passage in this week...');
+        const { data: existingPassages, error: fetchPassageError } = await supabase
+          .from('passages')
+          .select('id, body')
+          .eq('user_id', userId)
+          .eq('child_id', currentChild.id)
+          .eq('week_label', wl);
+        
+        if (fetchPassageError) {
+          console.log('Error fetching existing passage:', fetchPassageError);
+          throw fetchPassageError;
         }
-        console.log('Passage saved successfully');
+        
+        if (existingPassages && existingPassages.length > 0) {
+          const existing = existingPassages[0];
+          const existingBody = (existing.body || '').trim();
+          
+          // Merge: if existing is empty, use new. Otherwise append with newline.
+          const mergedBody = existingBody 
+            ? `${existingBody}\n\n${passageText}` 
+            : passageText;
+          
+          console.log('[ImportScreen] Updating existing passage (merging content)');
+          const { error: updateError } = await supabase
+            .from('passages')
+            .update({ body: mergedBody })
+            .eq('id', existing.id);
+          
+          if (updateError) {
+            console.log('Passage update error:', updateError);
+            throw updateError;
+          }
+          console.log('Passage merged successfully');
+        } else {
+          console.log('[ImportScreen] No existing passage, inserting new one');
+          const { error: passageError } = await supabase.from('passages').insert({
+            body: passageText,
+            user_id: userId,
+            child_id: currentChild.id,
+            week_label: wl,
+          });
+          if (passageError) {
+            console.log('Passage save error:', passageError);
+            throw passageError;
+          }
+          console.log('Passage saved successfully');
+        }
       } else {
-        console.log('[ImportScreen] Skipping passages insert — passageText is empty after trim.');
+        console.log('[ImportScreen] Skipping passages — passageText is empty after trim.');
       }
 
       setSaveSuccess({
-        count: confirmedWords.length,
+        count: wordsToInsert.length,
+        totalWords: confirmedWords.length,
+        skipped: confirmedWords.length - wordsToInsert.length,
         weekLabel: wl,
         words: insertedWordRows,
         passageSaved: Boolean(passageText),
@@ -984,12 +1047,16 @@ export default function ImportScreen() {
             <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
               <View style={styles.successBox}>
                 <Text style={styles.successText}>
-                  {saveSuccess.passageSaved && saveSuccess.count === 0
-                    ? '✓ Sentences saved.'
-                    : saveSuccess.passageSaved
-                      ? `✓ ${saveSuccess.count} words saved! Sentences saved.`
-                      : `✓ ${saveSuccess.count} words saved!`}
+                  {`Saved ${saveSuccess.count} new words to ${String(saveSuccess.weekLabel ?? '')}`}
                 </Text>
+                {Number(saveSuccess.skipped ?? 0) > 0 ? (
+                  <Text style={styles.successMetaText}>
+                    {`${saveSuccess.skipped} words already existed in this week and were skipped.`}
+                  </Text>
+                ) : null}
+                {saveSuccess.passageSaved ? (
+                  <Text style={styles.successMetaText}>Dictation passage merged.</Text>
+                ) : null}
                 <TouchableWithoutFeedback onPress={() => Keyboard.dismiss()}>
                   <TouchableOpacity
                     style={styles.successStartBtn}
@@ -1405,7 +1472,12 @@ const styles = StyleSheet.create({
     color: '#2D7A16',
     fontSize: 18,
     fontWeight: '700',
-    marginBottom: 12,
+    marginBottom: 8,
+  },
+  successMetaText: {
+    color: '#2D7A16',
+    fontSize: 14,
+    marginBottom: 8,
   },
   successStartBtn: {
     width: '100%',

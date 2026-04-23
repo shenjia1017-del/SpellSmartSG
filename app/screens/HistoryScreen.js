@@ -1,197 +1,188 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, Alert, ActivityIndicator
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { useChild } from '../lib/childContext';
 
 export default function HistoryScreen() {
   const router = useRouter();
   const { currentChild } = useChild();
-  const [weekGroups, setWeekGroups] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedChild, setSelectedChild] = useState('All');
+  const [refreshing, setRefreshing] = useState(false);
+  const [weekGroups, setWeekGroups] = useState([]);
 
-  const loadWeeks = async () => {
-    setLoading(true);
+  const loadHistory = useCallback(async () => {
+    if (!currentChild?.id) {
+      setWeekGroups([]);
+      setLoading(false);
+      return;
+    }
+
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data, error } = await supabase
+
+      const { data: wordData, error: wordError } = await supabase
         .from('words')
-        .select('week_label')
+        .select('week_label, created_at')
         .eq('user_id', user.id)
-        .eq('child_id', currentChild?.id ?? '');
-      if (error) throw error;
-      const labels = [...new Set(data.map(w => w.week_label))].sort().reverse();
-      setWeekGroups(labels);
+        .eq('child_id', currentChild.id);
+
+      if (wordError) throw wordError;
+
+      const { data: passageData, error: passageError } = await supabase
+        .from('passages')
+        .select('week_label, created_at')
+        .eq('user_id', user.id)
+        .eq('child_id', currentChild.id);
+
+      if (passageError) throw passageError;
+
+      // Aggregate by week_label
+      const grouped = new Map();
+      (wordData || []).forEach((row) => {
+        if (!row.week_label) return;
+        const bucket = grouped.get(row.week_label) || {
+          weekLabel: row.week_label,
+          wordCount: 0,
+          passageCount: 0,
+          latestCreatedAt: 0,
+        };
+        bucket.wordCount += 1;
+        const ts = row.created_at ? new Date(row.created_at).getTime() : 0;
+        if (ts > bucket.latestCreatedAt) bucket.latestCreatedAt = ts;
+        grouped.set(row.week_label, bucket);
+      });
+
+      (passageData || []).forEach((row) => {
+        if (!row.week_label) return;
+        const bucket = grouped.get(row.week_label) || {
+          weekLabel: row.week_label,
+          wordCount: 0,
+          passageCount: 0,
+          latestCreatedAt: 0,
+        };
+        bucket.passageCount += 1;
+        const ts = row.created_at ? new Date(row.created_at).getTime() : 0;
+        if (ts > bucket.latestCreatedAt) bucket.latestCreatedAt = ts;
+        grouped.set(row.week_label, bucket);
+      });
+
+      const groups = Array.from(grouped.values()).sort(
+        (a, b) => b.latestCreatedAt - a.latestCreatedAt
+      );
+
+      setWeekGroups(groups);
     } catch (e) {
-      console.error(e);
+      console.log('History load error:', e);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
+  }, [currentChild?.id]);
+
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      loadHistory();
+    }, [loadHistory])
+  );
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadHistory();
   };
 
-  useFocusEffect(useCallback(() => { loadWeeks(); }, [currentChild?.id]));
-
-  const confirmDelete = (weekLabel) => {
-    Alert.alert(
-      'Delete Week',
-      `Delete all words for ${weekLabel}? This cannot be undone.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: () => deleteWeek(weekLabel) }
-      ]
-    );
+  const formatDate = (ts) => {
+    if (!ts) return '';
+    const d = new Date(ts);
+    return d.toLocaleDateString('en-SG', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
   };
-
-  const deleteWeek = async (weekLabel) => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      await supabase
-        .from('words')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('child_id', currentChild?.id ?? '')
-        .eq('week_label', weekLabel);
-      await supabase
-        .from('passages')
-        .delete()
-        .eq('user_id', user.id)
-        .eq('child_id', currentChild?.id ?? '')
-        .eq('week_label', weekLabel);
-      loadWeeks();
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const currentWeek = weekGroups[0];
-  const pastWeeks = weekGroups.slice(1);
 
   return (
-    <View style={styles.container}>
-      <View style={styles.pageHeader}>
-        <Text style={styles.pageTitle}>Achievement History</Text>
-        <Text style={styles.pageSubtitle}>All your spelling weeks</Text>
-      </View>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.content}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+    >
+      <Text style={styles.title}>History</Text>
+      <Text style={styles.subtitle}>All imported weeks</Text>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
-        {loading ? (
-          <ActivityIndicator color="#F97316" style={{ marginTop: 40 }} />
-        ) : weekGroups.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyEmoji}>📭</Text>
-            <Text style={styles.emptyTitle}>No weeks yet</Text>
-            <Text style={styles.emptySub}>Import your first word list to get started!</Text>
-            <TouchableOpacity style={styles.emptyBtn} onPress={() => router.push('/import')}>
-              <Text style={styles.emptyBtnText}>+ Import Word List</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <>
-            {currentWeek && (
-              <>
-                <Text style={styles.sectionTitle}>CURRENT WEEK</Text>
-                <View style={styles.currentCard}>
-                  <View style={styles.cardTopRow}>
-                    <Text style={styles.currentCardTitle}>{currentWeek}</Text>
-                    <View style={styles.currentBadge}>
-                      <Text style={styles.currentBadgeText}>CURRENT</Text>
-                    </View>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.goBtn}
-                    onPress={() => router.push('/')}
-                  >
-                    <Text style={styles.goBtnText}>Go to this week →</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
-
-            {pastWeeks.length > 0 && (
-              <>
-                <Text style={styles.sectionTitle}>PAST WEEKS</Text>
-                {pastWeeks.map((weekLabel) => (
-                  <View key={weekLabel} style={styles.pastCard}>
-                    <View style={styles.cardTopRow}>
-                      <Text style={styles.pastCardTitle}>{weekLabel}</Text>
-                      <Text style={styles.stars}>⭐⭐⭐</Text>
-                    </View>
-                    <View style={styles.cardBottomRow}>
-                      <TouchableOpacity
-                        onPress={() => router.push('/')}
-                      >
-                        <Text style={styles.reviewText}>Review →</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity onPress={() => confirmDelete(weekLabel)}>
-                        <Text style={styles.deleteText}>🗑 Delete</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                ))}
-              </>
-            )}
-          </>
-        )}
-      </ScrollView>
-
-      <View style={styles.tabBar}>
-        <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/')}>
-          <Text style={styles.tabIcon}>🏠</Text>
-          <Text style={styles.tabLabel}>Home</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/album')}>
-          <Text style={styles.tabIcon}>🏅</Text>
-          <Text style={styles.tabLabel}>Album</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.tabItem}>
-          <Text style={styles.tabIcon}>📊</Text>
-          <Text style={[styles.tabLabel, styles.tabLabelActive]}>History</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/settings')}>
-          <Text style={styles.tabIcon}>⚙️</Text>
-          <Text style={styles.tabLabel}>Settings</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+      {loading ? (
+        <ActivityIndicator color="#F97316" style={{ marginTop: 40 }} />
+      ) : weekGroups.length === 0 ? (
+        <Text style={styles.emptyText}>
+          No history yet. Import your first word list from Home.
+        </Text>
+      ) : (
+        weekGroups.map((group) => (
+          <TouchableOpacity
+            key={group.weekLabel}
+            style={styles.weekCard}
+            onPress={() =>
+              router.push({
+                pathname: '/week-detail',
+                params: { week: group.weekLabel },
+              })
+            }
+            activeOpacity={0.7}
+          >
+            <View style={styles.weekCardLeft}>
+              <Text style={styles.weekLabel}>{group.weekLabel}</Text>
+              <Text style={styles.weekMeta}>
+                {group.wordCount} word{group.wordCount !== 1 ? 's' : ''}
+                {group.passageCount > 0
+                  ? ` · ${group.passageCount} passage${group.passageCount > 1 ? 's' : ''}`
+                  : ''}
+              </Text>
+              <Text style={styles.weekDate}>{formatDate(group.latestCreatedAt)}</Text>
+            </View>
+            <Text style={styles.arrow}>›</Text>
+          </TouchableOpacity>
+        ))
+      )}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF8F0' },
-  pageHeader: { backgroundColor: '#FFF8F0', paddingHorizontal: 16, paddingTop: 56, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F0E8DC' },
-  pageTitle: { fontSize: 20, fontWeight: '900', color: '#1A1A1A' },
-  pageSubtitle: { fontSize: 10, color: '#999', marginTop: 2 },
-  scroll: { flex: 1 },
-  scrollContent: { padding: 14, paddingBottom: 20 },
-  sectionTitle: { fontSize: 9, fontWeight: '700', color: '#bbb', letterSpacing: 1, marginBottom: 6, marginTop: 10 },
-  currentCard: { backgroundColor: '#FFF8F0', borderRadius: 14, borderWidth: 1.5, borderColor: '#F97316', padding: 14, marginBottom: 6 },
-  cardTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-  currentCardTitle: { fontSize: 16, fontWeight: '800', color: '#E65100' },
-  currentBadge: { backgroundColor: '#F97316', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
-  currentBadgeText: { fontSize: 8, fontWeight: '800', color: 'white', letterSpacing: 0.5 },
-  goBtn: { backgroundColor: '#F97316', borderRadius: 10, padding: 10, alignItems: 'center' },
-  goBtnText: { fontSize: 12, fontWeight: '700', color: 'white' },
-  pastCard: { backgroundColor: 'white', borderRadius: 14, borderWidth: 1.5, borderColor: '#F0E8DC', padding: 14, marginBottom: 7 },
-  pastCardTitle: { fontSize: 14, fontWeight: '700', color: '#1A1A1A' },
-  stars: { fontSize: 12 },
-  cardBottomRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F5F0EA' },
-  reviewText: { fontSize: 11, color: '#F97316', fontWeight: '700' },
-  deleteText: { fontSize: 11, color: '#E57373', fontWeight: '600' },
-  emptyState: { alignItems: 'center', paddingTop: 60 },
-  emptyEmoji: { fontSize: 48, marginBottom: 12 },
-  emptyTitle: { fontSize: 18, fontWeight: '800', color: '#1A1A1A', marginBottom: 6 },
-  emptySub: { fontSize: 13, color: '#999', textAlign: 'center', marginBottom: 20 },
-  emptyBtn: { backgroundColor: '#F97316', borderRadius: 14, paddingVertical: 12, paddingHorizontal: 24 },
-  emptyBtnText: { fontSize: 14, fontWeight: '700', color: 'white' },
-  tabBar: { flexDirection: 'row', backgroundColor: 'white', borderTopWidth: 0.5, borderTopColor: '#F0EAE0', paddingBottom: 20, paddingTop: 8 },
-  tabItem: { flex: 1, alignItems: 'center' },
-  tabIcon: { fontSize: 20, marginBottom: 2 },
-  tabLabel: { fontSize: 9, color: '#B0BEC5', fontWeight: '600' },
-  tabLabelActive: { color: '#F97316' },
+  content: { padding: 20, paddingBottom: 60 },
+  title: { fontSize: 28, fontWeight: '700', color: '#1F2937', marginBottom: 4 },
+  subtitle: { fontSize: 14, color: '#6B7280', marginBottom: 24 },
+  weekCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#F3E8D8',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  weekCardLeft: { flex: 1 },
+  weekLabel: { fontSize: 17, fontWeight: '600', color: '#1F2937', marginBottom: 4 },
+  weekMeta: { fontSize: 13, color: '#6B7280', marginBottom: 2 },
+  weekDate: { fontSize: 12, color: '#9CA3AF' },
+  arrow: { fontSize: 24, color: '#F97316', fontWeight: '300' },
+  emptyText: {
+    fontSize: 14,
+    color: '#9CA3AF',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 40,
+  },
 });

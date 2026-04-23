@@ -403,13 +403,17 @@ export default function HomeScreen() {
           ) : null}
           {!loading && weekGroups
             .filter((group) => isValidWeekLabel(group.weekLabel))
+            .slice(0, 1)
             .map((group) => {
               const active = group.weekLabel === selectedWeek;
               return (
                 <TouchableOpacity
                   key={group.weekLabel}
                   style={[styles.weekChipItem, !active && styles.weekChipItemInactive]}
-                  onPress={() => setSelectedWeek(group.weekLabel)}
+                  onPress={() => {
+                    setSelectedWeek(group.weekLabel);
+                    router.push({ pathname: '/week-detail', params: { week: group.weekLabel } });
+                  }}
                   activeOpacity={0.7}
                 >
                   <View style={styles.weekChipLeft}>

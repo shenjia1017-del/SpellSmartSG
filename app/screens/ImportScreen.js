@@ -1,4 +1,4 @@
-import { useRouter } from 'expo-router';
+import { useNavigation, useRouter } from 'expo-router';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -37,7 +37,9 @@ function guessImageMimeFromFileName(name) {
 
 export default function ImportScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { currentChild } = useChild();
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [wordInput, setWordInput] = useState('');
 
@@ -85,6 +87,33 @@ export default function ImportScreen() {
       scrollRef.current?.scrollTo({ y: Math.max(0, y - 16), animated: true });
     });
   };
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, () => {
+      setIsKeyboardVisible(true);
+      navigation.setOptions({
+        tabBarStyle: { display: 'none' },
+      });
+    });
+
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setIsKeyboardVisible(false);
+      navigation.setOptions({
+        tabBarStyle: undefined,
+      });
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+      navigation.setOptions({
+        tabBarStyle: undefined,
+      });
+    };
+  }, [navigation]);
 
   const waitOcrRateLimit = async () => {
     const now = Date.now();
@@ -806,7 +835,7 @@ export default function ImportScreen() {
         <ScrollView
           ref={scrollRef}
           style={styles.scrollArea}
-          contentContainerStyle={[styles.scrollContent, { paddingBottom: 300 }]}
+          contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 }]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator
         >
@@ -1133,24 +1162,26 @@ export default function ImportScreen() {
 
         </ScrollView>
 
-        <View style={styles.tabBar}>
-          <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/')}>
-            <Text style={styles.tabIcon}>🏠</Text>
-            <Text style={styles.tabLabel}>Home</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/album')}>
-            <Text style={styles.tabIcon}>🏅</Text>
-            <Text style={styles.tabLabel}>Album</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/history')}>
-            <Text style={styles.tabIcon}>📊</Text>
-            <Text style={styles.tabLabel}>History</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/settings')}>
-            <Text style={styles.tabIcon}>⚙️</Text>
-            <Text style={styles.tabLabel}>Settings</Text>
-          </TouchableOpacity>
-        </View>
+        {!isKeyboardVisible ? (
+          <View style={styles.tabBar}>
+            <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/')}>
+              <Text style={styles.tabIcon}>🏠</Text>
+              <Text style={styles.tabLabel}>Home</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/album')}>
+              <Text style={styles.tabIcon}>🏅</Text>
+              <Text style={styles.tabLabel}>Album</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/history')}>
+              <Text style={styles.tabIcon}>📊</Text>
+              <Text style={styles.tabLabel}>History</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/settings')}>
+              <Text style={styles.tabIcon}>⚙️</Text>
+              <Text style={styles.tabLabel}>Settings</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
       </View>
     </KeyboardAvoidingView>
   );

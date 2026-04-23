@@ -6,9 +6,11 @@ import {
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../../lib/supabase';
+import { useChild } from '../lib/childContext';
 
 export default function HistoryScreen() {
   const router = useRouter();
+  const { currentChild } = useChild();
   const [weekGroups, setWeekGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedChild, setSelectedChild] = useState('All');
@@ -21,7 +23,8 @@ export default function HistoryScreen() {
       const { data, error } = await supabase
         .from('words')
         .select('week_label')
-        .eq('user_id', user.id);
+        .eq('user_id', user.id)
+        .eq('child_id', currentChild?.id ?? '');
       if (error) throw error;
       const labels = [...new Set(data.map(w => w.week_label))].sort().reverse();
       setWeekGroups(labels);
@@ -32,7 +35,7 @@ export default function HistoryScreen() {
     }
   };
 
-  useFocusEffect(useCallback(() => { loadWeeks(); }, []));
+  useFocusEffect(useCallback(() => { loadWeeks(); }, [currentChild?.id]));
 
   const confirmDelete = (weekLabel) => {
     Alert.alert(
@@ -48,8 +51,18 @@ export default function HistoryScreen() {
   const deleteWeek = async (weekLabel) => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      await supabase.from('words').delete().eq('user_id', user.id).eq('week_label', weekLabel);
-      await supabase.from('passages').delete().eq('user_id', user.id).eq('week_label', weekLabel);
+      await supabase
+        .from('words')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('child_id', currentChild?.id ?? '')
+        .eq('week_label', weekLabel);
+      await supabase
+        .from('passages')
+        .delete()
+        .eq('user_id', user.id)
+        .eq('child_id', currentChild?.id ?? '')
+        .eq('week_label', weekLabel);
       loadWeeks();
     } catch (e) {
       console.error(e);

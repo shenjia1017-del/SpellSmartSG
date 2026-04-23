@@ -24,6 +24,7 @@ import {
   TTS_VOICE_PHONEME,
 } from '../../lib/phonics';
 import { supabase } from '../../lib/supabase';
+import { useChild } from '../lib/childContext';
 
 const REMEMBER_PRAISE_POOL = [
   'Great job!', 'Well done!', 'You got it!', 'Nice work!',
@@ -225,6 +226,7 @@ function resolvePhonicsBoundarySyllables(params, currentSyllables) {
 
 export default function PracticeScreen() {
   const router = useRouter();
+  const { currentChild } = useChild();
   const navigation = useNavigation();
   const params = useLocalSearchParams();
   const word = String(paramStr(params, 'word')).trim();
@@ -396,7 +398,11 @@ export default function PracticeScreen() {
       const userId = sessionData?.session?.user?.id;
       let pool = [];
       if (userId) {
-        const { data, error } = await supabase.from('words').select('word').eq('user_id', userId);
+        const { data, error } = await supabase
+          .from('words')
+          .select('word')
+          .eq('user_id', userId)
+          .eq('child_id', currentChild?.id ?? '');
         if (!error && Array.isArray(data)) {
           pool = [
             ...new Set(

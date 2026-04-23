@@ -9,6 +9,7 @@ import { useRouter } from 'expo-router';
 import { supabase } from '../../lib/supabase';
 import { getWeekMastery, completeWeek } from '../lib/gardenHelpers';
 import WeekCompleteModal from '../components/WeekCompleteModal';
+import { useChild } from '../lib/childContext';
 
 const STATUS_EMOJI = {
   soil: null,
@@ -19,6 +20,7 @@ const STATUS_EMOJI = {
 
 export default function GardenScreen() {
   const router = useRouter();
+  const { currentChild } = useChild();
   const [weekGroups, setWeekGroups] = useState([]);
   const [selectedWeek, setSelectedWeek] = useState('');
   const [words, setWords] = useState([]);
@@ -32,7 +34,7 @@ export default function GardenScreen() {
   useFocusEffect(
     React.useCallback(() => {
       loadWeeks();
-    }, [])
+    }, [currentChild?.id])
   );
 
   useEffect(() => {
@@ -46,6 +48,7 @@ export default function GardenScreen() {
       .from('words')
       .select('id, word, week_label')
       .eq('user_id', user.id)
+      .eq('child_id', currentChild?.id ?? '')
       .order('created_at', { ascending: true });
     if (!data) return;
     const grouped = {};

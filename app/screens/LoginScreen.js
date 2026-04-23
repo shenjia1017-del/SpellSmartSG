@@ -27,7 +27,7 @@ export default function LoginScreen() {
       try {
         const { data } = await supabase.auth.getSession();
         if (isActive && data?.session) {
-          router.replace('/home');
+          router.replace('/');
         }
       } catch {
         // Ignore and allow user to manually login.
@@ -63,7 +63,7 @@ export default function LoginScreen() {
 
       if (error) throw error;
 
-      router.replace('/home');
+      router.replace('/');
     } catch (e) {
       setErrorMsg(e?.message ?? 'Failed to log in.');
     } finally {

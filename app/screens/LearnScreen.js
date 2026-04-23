@@ -15,6 +15,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { ensurePhonemeClipsInStorage } from '../../lib/phonemeStorage';
 import { fetchOpenAITtsAudio, splitPhonicsToSyllables } from '../../lib/phonics';
 import { supabase } from '../../lib/supabase';
+import { useChild } from '../lib/childContext';
 
 const CLAUDE_MIN_INTERVAL_MS = 2000;
 const TTS_MIN_INTERVAL_MS = 800;
@@ -389,6 +390,7 @@ function paramFromSearchParams(params, key) {
 export default function LearnScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const { currentChild } = useChild();
   const [userId, setUserId] = useState(null);
   const [words, setWords] = useState([]);
   const [index, setIndex] = useState(0);
@@ -481,10 +483,21 @@ export default function LearnScreen() {
           return;
         }
         if (!cancelled) setUserId(uid);
+        if (!currentChild?.id) {
+          if (!cancelled) {
+            setErrorMsg('Please select a child profile first.');
+            setWords([]);
+          }
+          return;
+        }
 
         let list = passedWords;
         if (list.length === 0) {
-          let query = supabase.from('words').select('id, word, learn_card_json').eq('user_id', uid);
+          let query = supabase
+            .from('words')
+            .select('id, word, learn_card_json')
+            .eq('user_id', uid)
+            .eq('child_id', currentChild.id);
           let { data, error } = await query.order('created_at', { ascending: true });
 
           if (error) {
@@ -492,6 +505,7 @@ export default function LearnScreen() {
               .from('words')
               .select('id, word, learn_card_json')
               .eq('user_id', uid)
+              .eq('child_id', currentChild.id)
               .order('id', { ascending: true });
             data = retry.data;
             error = retry.error;
@@ -534,7 +548,7 @@ export default function LearnScreen() {
     return () => {
       cancelled = true;
     };
-  }, [params.wordsJSON, params.learnIndex]);
+  }, [params.wordsJSON, params.learnIndex, currentChild?.id]);
 
   useEffect(() => {
     if (!currentWord || !userId) {
@@ -654,7 +668,8 @@ export default function LearnScreen() {
           const { error: upErr } = await supabase
             .from('words')
             .update({ learn_card_json: content })
-            .eq('id', persistId);
+            .eq('id', persistId)
+            .eq('child_id', currentChild?.id ?? '');
           if (upErr) {
             console.warn('[LearnScreen] Failed to cache learn_card_json:', upErr);
           } else {

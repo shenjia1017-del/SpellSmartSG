@@ -22,6 +22,7 @@ import {
 import { supabase } from '../../lib/supabase';
 import { completeWeek, updateWordMastery } from '../lib/gardenHelpers';
 import WeekCompleteModal from '../components/WeekCompleteModal';
+import { useChild } from '../lib/childContext';
 
 const BLUE = '#F97316';
 const GREEN_PHRASE = '#2e7d32';
@@ -215,6 +216,7 @@ export default function DictationScreen() {
   const router = useRouter();
   const navigation = useNavigation();
   const params = useLocalSearchParams();
+  const { currentChild } = useChild();
 
   /** When set (including empty string), load words + passages from Supabase for that week only. */
   const useWeekFetch = params.weekLabel !== undefined && params.weekLabel !== null;
@@ -268,11 +270,13 @@ export default function DictationScreen() {
             .from('words')
             .select('id, word, week_label')
             .eq('user_id', userId)
+            .eq('child_id', currentChild?.id ?? '')
             .eq('week_label', weekLabelForQuery),
           supabase
             .from('passages')
             .select('id, body, week_label')
             .eq('user_id', userId)
+            .eq('child_id', currentChild?.id ?? '')
             .eq('week_label', weekLabelForQuery)
             .order('id', { ascending: true }),
         ]);
@@ -295,7 +299,7 @@ export default function DictationScreen() {
     return () => {
       cancelled = true;
     };
-  }, [useWeekFetch, weekLabelForQuery]);
+  }, [useWeekFetch, weekLabelForQuery, currentChild?.id]);
 
   const words = useWeekFetch ? fetchedWords : wordsFromParams;
   const passages = useWeekFetch ? fetchedPassages : passagesFromParams;

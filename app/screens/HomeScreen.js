@@ -2,6 +2,8 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Modal,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,6 +16,7 @@ import { completeWeek } from '../lib/gardenHelpers';
 import WeekCompleteModal from '../components/WeekCompleteModal';
 import LottieView from 'lottie-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useChild } from '../lib/childContext';
 
 function isValidWeekLabel(wl) {
   return wl != null && String(wl).trim() !== '';
@@ -21,6 +24,7 @@ function isValidWeekLabel(wl) {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { currentChild, children, setCurrentChild } = useChild();
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [weekGroups, setWeekGroups] = useState([]);
@@ -30,6 +34,13 @@ export default function HomeScreen() {
   const [modalFlower, setModalFlower] = useState(null);
   const [modalCreature, setModalCreature] = useState(null);
   const [modalTotalFlowers, setModalTotalFlowers] = useState(0);
+  const [childMenuVisible, setChildMenuVisible] = useState(false);
+
+  useEffect(() => {
+    if (!currentChild && children.length > 0) {
+      router.replace('/select-child');
+    }
+  }, [currentChild, children.length, router]);
 
   const loadBloomCount = useCallback(async (userId, weekLabel) => {
     if (!userId || !weekLabel) return;
@@ -68,6 +79,7 @@ export default function HomeScreen() {
             .from('words')
             .select('id, word, user_id, week_label, created_at, learn_card_json')
             .eq('user_id', userId)
+            .eq('child_id', currentChild?.id ?? '')
             .order('created_at', { ascending: true });
 
           if (error) {
@@ -75,6 +87,7 @@ export default function HomeScreen() {
               .from('words')
               .select('id, word, user_id, week_label, created_at, learn_card_json')
               .eq('user_id', userId)
+              .eq('child_id', currentChild?.id ?? '')
               .order('id', { ascending: true });
             data = retry.data;
             error = retry.error;
@@ -100,12 +113,14 @@ export default function HomeScreen() {
             .from('passages')
             .select('id, body, week_label, created_at')
             .eq('user_id', userId)
+            .eq('child_id', currentChild?.id ?? '')
             .order('created_at', { ascending: true });
           if (passageError) {
             const retryP = await supabase
               .from('passages')
               .select('id, body, week_label, created_at')
               .eq('user_id', userId)
+              .eq('child_id', currentChild?.id ?? '')
               .order('id', { ascending: true });
             passageData = retryP.data;
             passageError = retryP.error;
@@ -169,7 +184,7 @@ export default function HomeScreen() {
       return () => {
         cancelled = true;
       };
-    }, [loadBloomCount]),
+    }, [loadBloomCount, currentChild?.id]),
   );
 
   useEffect(() => {
@@ -192,6 +207,9 @@ export default function HomeScreen() {
     () => weekGroups.reduce((sum, g) => sum + g.words.length, 0),
     [weekGroups],
   );
+  const childAvatar = currentChild?.gender === 'girl'
+    ? { emoji: '👧', bg: '#FCE7F3' }
+    : { emoji: '👦', bg: '#DBEAFE' };
 
   const handleCompleteWeek = async () => {
     try {
@@ -236,9 +254,22 @@ export default function HomeScreen() {
                 {selectedWeek && isValidWeekLabel(selectedWeek) ? selectedWeek.toUpperCase() : 'NO WEEK'}
               </Text>
             </View>
-            <Text style={styles.wordCountSmall}>
-              {totalCount > 0 ? `${totalCount} words imported` : 'No words yet'}
-            </Text>
+            <View style={styles.heroRight}>
+              <Text style={styles.wordCountSmall}>
+                {totalCount > 0 ? `${totalCount} words imported` : 'No words yet'}
+              </Text>
+              <TouchableOpacity
+                style={styles.childSwitchBtn}
+                onPress={() => setChildMenuVisible(true)}
+              >
+                <View style={[styles.childSwitchAvatar, { backgroundColor: childAvatar.bg }]}>
+                  <Text>{childAvatar.emoji}</Text>
+                </View>
+                <Text style={styles.childSwitchName}>
+                  {String(currentChild?.name ?? 'No child').trim().split(/\s+/)[0]}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
           <View style={styles.mascotRow}>
             <LottieView
@@ -412,6 +443,46 @@ export default function HomeScreen() {
         onClose={() => setModalVisible(false)}
       />
 
+      <Modal visible={childMenuVisible} transparent animationType="fade" onRequestClose={() => setChildMenuVisible(false)}>
+        <Pressable style={styles.childMenuBackdrop} onPress={() => setChildMenuVisible(false)}>
+          <View style={styles.childMenuCard}>
+            {children.map((child) => {
+              const avatar = child.gender === 'girl'
+                ? { emoji: '👧', bg: '#FCE7F3' }
+                : { emoji: '👦', bg: '#DBEAFE' };
+              const active = child.id === currentChild?.id;
+              return (
+                <TouchableOpacity
+                  key={child.id}
+                  style={[styles.childMenuRow, active && styles.childMenuRowActive]}
+                  onPress={async () => {
+                    await setCurrentChild(child);
+                    setChildMenuVisible(false);
+                  }}
+                >
+                  <View style={[styles.childMenuAvatar, { backgroundColor: avatar.bg }]}>
+                    <Text>{avatar.emoji}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.childMenuName}>{child.name}</Text>
+                    {active ? <Text style={styles.childMenuTag}>Currently learning</Text> : null}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+            <TouchableOpacity
+              style={styles.childManageBtn}
+              onPress={() => {
+                setChildMenuVisible(false);
+                router.push('/settings/children');
+              }}
+            >
+              <Text style={styles.childManageText}>⚙️ Manage children</Text>
+            </TouchableOpacity>
+          </View>
+        </Pressable>
+      </Modal>
+
       <View style={styles.tabBar}>
         <TouchableOpacity style={styles.tabItem} onPress={() => router.push('/')}>
           <Text style={styles.tabIcon}>🏠</Text>
@@ -446,9 +517,13 @@ const styles = StyleSheet.create({
 
   heroSection: { width: '100%', backgroundColor: '#FFF8F0', paddingHorizontal: 16, paddingTop: 56, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F0E8DC' },
   heroTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  heroRight: { alignItems: 'flex-end', gap: 6 },
   weekBadge: { backgroundColor: '#F97316', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 4 },
   weekBadgeText: { fontSize: 11, fontWeight: '800', color: 'white', letterSpacing: 0.5 },
   wordCountSmall: { fontSize: 11, color: '#999', fontWeight: '500' },
+  childSwitchBtn: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  childSwitchAvatar: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  childSwitchName: { fontSize: 12, color: '#333', fontWeight: '700' },
   mascotRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   mascot: { width: 110, height: 110 },
   speechBubble: { flex: 1, backgroundColor: 'white', borderRadius: 16, borderWidth: 1.5, borderColor: '#F0E0CC', padding: 10 },
@@ -550,4 +625,47 @@ const styles = StyleSheet.create({
   tabIcon: { fontSize: 20, marginBottom: 2 },
   tabLabel: { fontSize: 10, color: '#B0BEC5', fontWeight: '500' },
   tabLabelActive: { color: '#F97316', fontWeight: '700' },
+  childMenuBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.15)',
+    paddingTop: 120,
+    paddingHorizontal: 18,
+    alignItems: 'flex-end',
+  },
+  childMenuCard: {
+    width: 260,
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#F0E8DC',
+    padding: 10,
+    gap: 6,
+  },
+  childMenuRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+  },
+  childMenuRowActive: {
+    backgroundColor: '#FFF3E0',
+  },
+  childMenuAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  childMenuName: { fontSize: 14, fontWeight: '700', color: '#222' },
+  childMenuTag: { fontSize: 11, color: '#F97316', marginTop: 1 },
+  childManageBtn: {
+    marginTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#F0E8DC',
+    paddingTop: 8,
+  },
+  childManageText: { color: '#666', fontSize: 13, fontWeight: '600' },
 });

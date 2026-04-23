@@ -21,6 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { extractTextFromPdfPage1Base64 } from '../../lib/pdfPage1Text';
 import { supabase } from '../../lib/supabase';
+import { useChild } from '../lib/childContext';
 
 const OCR_MIN_INTERVAL_MS = 2000;
 
@@ -36,6 +37,7 @@ function guessImageMimeFromFileName(name) {
 
 export default function ImportScreen() {
   const router = useRouter();
+  const { currentChild } = useChild();
   const [showManual, setShowManual] = useState(false);
   const [wordInput, setWordInput] = useState('');
 
@@ -180,7 +182,10 @@ export default function ImportScreen() {
     setLoadingWords(true);
     setErrorMsg(null);
     try {
-      const { data, error } = await supabase.from('words').select('*');
+      const { data, error } = await supabase
+        .from('words')
+        .select('*')
+        .eq('child_id', currentChild?.id ?? '');
       if (error) throw error;
       const rows = Array.isArray(data) ? data : [];
       console.log('Setting words:', rows);
@@ -204,6 +209,7 @@ export default function ImportScreen() {
         .from('words')
         .select('week_label')
         .eq('user_id', userId)
+        .eq('child_id', currentChild?.id ?? '')
         .not('week_label', 'is', null);
       if (error) throw error;
       const seen = new Set();
@@ -612,12 +618,17 @@ export default function ImportScreen() {
         setErrorMsg('You must be logged in to save.');
         return;
       }
+      if (!currentChild?.id) {
+        setErrorMsg('Please select a child profile first.');
+        return;
+      }
 
       let insertedWordRows = [];
       if (confirmedWords.length) {
         const rows = confirmedWords.map((word) => ({
           word,
           user_id: userId,
+          child_id: currentChild.id,
           week_label: wl,
         }));
         const { data: insertedData, error: wordsError } = await supabase
@@ -633,6 +644,7 @@ export default function ImportScreen() {
         const { error: passageError } = await supabase.from('passages').insert({
           body: passageText,
           user_id: userId,
+          child_id: currentChild.id,
           week_label: wl,
         });
         if (passageError) {
@@ -689,9 +701,17 @@ export default function ImportScreen() {
         setErrorMsg('You must be logged in to save words.');
         return;
       }
+      if (!currentChild?.id) {
+        setErrorMsg('Please select a child profile first.');
+        return;
+      }
 
       // Assumes your `words` table uses `word` and `user_id` columns.
-      const { error } = await supabase.from('words').insert({ word: trimmed, user_id: userId });
+      const { error } = await supabase.from('words').insert({
+        word: trimmed,
+        user_id: userId,
+        child_id: currentChild.id,
+      });
       if (error) throw error;
 
       setWordInput('');

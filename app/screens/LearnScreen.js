@@ -5,11 +5,11 @@ import {
   ActivityIndicator,
   ScrollView,
   StyleSheet,
-  SafeAreaView,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import { ensurePhonemeClipsInStorage } from '../../lib/phonemeStorage';
@@ -389,6 +389,7 @@ function paramFromSearchParams(params, key) {
 
 export default function LearnScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
   const { currentChild } = useChild();
   const [userId, setUserId] = useState(null);
@@ -785,40 +786,40 @@ export default function LearnScreen() {
 
   if (loadingList) {
     return (
-      <SafeAreaView style={[styles.container, styles.centered]}>
+      <View style={[styles.container, styles.centered]}>
         <ActivityIndicator size="large" color="#F97316" />
         <Text style={styles.muted}>Loading your words…</Text>
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (!userId) {
     return (
-      <SafeAreaView style={[styles.container, styles.centered]}>
+      <View style={[styles.container, styles.centered]}>
         <Text style={styles.errorText}>{errorMsg ?? 'Not logged in.'}</Text>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (!words.length) {
     return (
-      <SafeAreaView style={[styles.container, styles.centered]}>
+      <View style={[styles.container, styles.centered]}>
         <Text style={styles.muted}>No words saved yet.</Text>
         <Text style={styles.hint}>Import a list from the Home screen first.</Text>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <SafeAreaView style={styles.safeAreaFill}>
-        <View style={styles.pageHeader}>
+      <View style={styles.safeAreaFill}>
+        <View style={[styles.pageHeader, { paddingTop: insets.top + 12 }]}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
             <Text style={styles.backBtnText}>←</Text>
           </TouchableOpacity>
@@ -924,7 +925,7 @@ export default function LearnScreen() {
             <Text style={styles.tabLabel}>Settings</Text>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </View>
     </View>
   );
 }
@@ -935,7 +936,7 @@ const styles = StyleSheet.create({
   pageHeader: {
     backgroundColor: '#FFF8F0',
     paddingHorizontal: 16,
-    paddingTop: 56,
+    paddingTop: 0,
     paddingBottom: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#F0E8DC',

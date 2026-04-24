@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
@@ -214,6 +215,7 @@ function parseJsonArrayParam(raw) {
 
 export default function DictationScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const params = useLocalSearchParams();
   const { currentChild } = useChild();
@@ -791,7 +793,7 @@ export default function DictationScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.pageHeader}>
+      <View style={[styles.pageHeader, { paddingTop: insets.top + 12 }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Text style={styles.backBtnText}>←</Text>
         </TouchableOpacity>
@@ -1208,7 +1210,7 @@ const styles = StyleSheet.create({
   pageHeader: {
     backgroundColor: '#FFF8F0',
     paddingHorizontal: 16,
-    paddingTop: 56,
+    paddingTop: 0,
     paddingBottom: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#F0E8DC',

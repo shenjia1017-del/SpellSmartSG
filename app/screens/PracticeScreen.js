@@ -14,6 +14,7 @@ import {
   Vibration,
   View
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
   fetchOpenAITtsAudio,
@@ -226,6 +227,7 @@ function resolvePhonicsBoundarySyllables(params, currentSyllables) {
 
 export default function PracticeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { currentChild } = useChild();
   const navigation = useNavigation();
   const params = useLocalSearchParams();
@@ -1080,7 +1082,7 @@ export default function PracticeScreen() {
 
   return (
     <View style={styles.root}>
-      <View style={styles.headerBar}>
+      <View style={[styles.headerBar, { paddingTop: insets.top + 12 }]}>
         <TouchableOpacity style={styles.headerBack} onPress={() => router.back()} hitSlop={12}>
           <Text style={styles.headerBackText}>← Back</Text>
         </TouchableOpacity>
@@ -1575,7 +1577,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: BLUE,
-    paddingTop: 50,
+    paddingTop: 0,
     paddingVertical: 12,
     paddingHorizontal: 8,
   },

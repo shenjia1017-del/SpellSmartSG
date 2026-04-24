@@ -6,6 +6,7 @@ import {
   InteractionManager,
   KeyboardAvoidingView,
   Keyboard,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -61,11 +62,14 @@ export default function ImportScreen() {
   const [weekLabel, setWeekLabel] = useState('');
   const [existingWeekLabels, setExistingWeekLabels] = useState([]);
   const [saveSuccess, setSaveSuccess] = useState(null);
+  const [showAddPagesModal, setShowAddPagesModal] = useState(false);
+  const [pagesCountForCurrentWeek, setPagesCountForCurrentWeek] = useState(0);
 
   const openAIApiKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
   const lastOcrAtRef = useRef(0);
-  const scrollRef = useRef(null);
+  const scrollViewRef = useRef(null);
   const scrollToReviewPendingRef = useRef(false);
+  const pageCountWeekRef = useRef(null);
 
   const scheduleScrollToReviewSection = () => {
     scrollToReviewPendingRef.current = true;
@@ -73,7 +77,7 @@ export default function ImportScreen() {
       setTimeout(() => {
         if (scrollToReviewPendingRef.current) {
           scrollToReviewPendingRef.current = false;
-          scrollRef.current?.scrollToEnd({ animated: true });
+          scrollViewRef.current?.scrollToEnd({ animated: true });
         }
       }, 400);
     });
@@ -84,7 +88,7 @@ export default function ImportScreen() {
     if (!scrollToReviewPendingRef.current) return;
     scrollToReviewPendingRef.current = false;
     InteractionManager.runAfterInteractions(() => {
-      scrollRef.current?.scrollTo({ y: Math.max(0, y - 16), animated: true });
+      scrollViewRef.current?.scrollTo({ y: Math.max(0, y - 16), animated: true });
     });
   };
 
@@ -114,6 +118,15 @@ export default function ImportScreen() {
       });
     };
   }, [navigation]);
+
+  useEffect(() => {
+    const t = String(weekLabel ?? '').trim();
+    const w = pageCountWeekRef.current;
+    if (w != null && t !== w) {
+      setPagesCountForCurrentWeek(0);
+      pageCountWeekRef.current = null;
+    }
+  }, [weekLabel]);
 
   const waitOcrRateLimit = async () => {
     const now = Date.now();
@@ -754,6 +767,13 @@ export default function ImportScreen() {
         words: insertedWordRows,
         passageSaved: Boolean(passageText),
       });
+
+      setPagesCountForCurrentWeek((prev) => {
+        const sameWeek = pageCountWeekRef.current === wl;
+        pageCountWeekRef.current = wl;
+        return sameWeek ? prev + 1 : 1;
+      });
+      setShowAddPagesModal(true);
     } catch (e) {
       setErrorMsg(e?.message ?? 'Failed to save words or passage.');
     } finally {
@@ -816,6 +836,34 @@ export default function ImportScreen() {
     }
   };
 
+  const onAddPagesModalAddAnother = () => {
+    setShowAddPagesModal(false);
+    scrollToReviewPendingRef.current = false;
+    setSaveSuccess(null);
+    setShowManual(false);
+    setWordInput('');
+    setPdfPreviewName('');
+    setPhotoUri('');
+    setExtractedWords([]);
+    setExtractedPassage('');
+    setExtractedWeekGroups([]);
+    setSelectedWeekGroupLabel('');
+    setEditingWeekGroupIndex(-1);
+    setEditingWeekGroupLabel('');
+    setManualWordToAdd('');
+    setErrorMsg(null);
+    setTimeout(() => {
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    }, 100);
+  };
+
+  const onAddPagesModalDone = () => {
+    setShowAddPagesModal(false);
+    setPagesCountForCurrentWeek(0);
+    pageCountWeekRef.current = null;
+    router.replace('/');
+  };
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
@@ -833,7 +881,7 @@ export default function ImportScreen() {
         </View>
 
         <ScrollView
-          ref={scrollRef}
+          ref={scrollViewRef}
           style={styles.scrollArea}
           contentContainerStyle={[styles.scrollContent, { paddingBottom: 100 }]}
           keyboardShouldPersistTaps="handled"
@@ -1183,6 +1231,39 @@ export default function ImportScreen() {
           </View>
         ) : null}
       </View>
+
+      <Modal
+        visible={showAddPagesModal}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setShowAddPagesModal(false)}
+      >
+        <View style={styles.addPagesModalOverlay}>
+          <View style={styles.addPagesModalCard}>
+            <Text style={styles.addPagesModalTitle}>
+              {`Page ${pagesCountForCurrentWeek} saved ✓`}
+            </Text>
+            <Text style={styles.addPagesModalMessage}>
+              Got more pages to scan for this week?
+            </Text>
+            <TouchableOpacity
+              style={styles.addPagesModalPrimaryBtn}
+              onPress={onAddPagesModalAddAnother}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.addPagesModalPrimaryBtnText}>📷 Add another page</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.addPagesModalSecondaryBtn}
+              onPress={onAddPagesModalDone}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.addPagesModalSecondaryBtnText}>Done — I'm finished</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -1558,5 +1639,63 @@ const styles = StyleSheet.create({
   backText: {
     color: '#4A90E2',
     fontSize: 16,
+  },
+  addPagesModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  addPagesModalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: 24,
+    width: '100%',
+    maxWidth: 340,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  addPagesModalTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: '#1A1A1A',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  addPagesModalMessage: {
+    fontSize: 15,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  addPagesModalPrimaryBtn: {
+    backgroundColor: '#EF9F27',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  addPagesModalPrimaryBtnText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  addPagesModalSecondaryBtn: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: '#D1D5DB',
+  },
+  addPagesModalSecondaryBtnText: {
+    color: '#374151',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

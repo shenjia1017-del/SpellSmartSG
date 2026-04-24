@@ -9,11 +9,13 @@ import {
   Alert,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { useChild } from '../lib/childContext';
 
 export default function WeekDetailScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
   const weekLabel = params.week;
   const { currentChild } = useChild();
@@ -70,8 +72,15 @@ export default function WeekDetailScreen() {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <TouchableOpacity onPress={handleBack} style={styles.backBtn}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
+    >
+      <TouchableOpacity
+        onPress={handleBack}
+        style={styles.backBtn}
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+      >
         <Text style={styles.backText}>← Back</Text>
       </TouchableOpacity>
 

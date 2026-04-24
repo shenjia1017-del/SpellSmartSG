@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { getCollection } from '../lib/gardenHelpers';
 import { CREATURES } from '../constants/gardenData';
@@ -12,6 +13,7 @@ export default function AlbumScreen() {
   const [creatures, setCreatures] = useState([]);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   useEffect(() => { loadCollection(); }, []);
 
@@ -40,7 +42,7 @@ export default function AlbumScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.pageHeader}>
+      <View style={[styles.pageHeader, { paddingTop: insets.top + 12 }]}>
         <Text style={styles.pageTitle}>My Album</Text>
         <Text style={styles.pageSubtitle}>Keep learning to unlock more! 🌟</Text>
       </View>
@@ -149,7 +151,7 @@ export default function AlbumScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFF8F0' },
-  pageHeader: { backgroundColor: '#FFF8F0', paddingHorizontal: 16, paddingTop: 56, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F0E8DC' },
+  pageHeader: { backgroundColor: '#FFF8F0', paddingHorizontal: 16, paddingTop: 0, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F0E8DC' },
   pageTitle: { fontSize: 20, fontWeight: '900', color: '#1A1A1A' },
   pageSubtitle: { fontSize: 11, color: '#F97316', fontWeight: '600', marginTop: 3 },
   scroll: { flex: 1 },

@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { completeWeek } from '../lib/gardenHelpers';
 import WeekCompleteModal from '../components/WeekCompleteModal';
@@ -24,6 +25,7 @@ function isValidWeekLabel(wl) {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { currentChild, children, setCurrentChild } = useChild();
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -247,7 +249,7 @@ export default function HomeScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.heroSection}>
+        <View style={[styles.heroSection, { paddingTop: insets.top + 12 }]}>
           <View style={styles.heroTopRow}>
             <View style={styles.weekBadge}>
               <Text style={styles.weekBadgeText}>
@@ -519,7 +521,7 @@ const styles = StyleSheet.create({
   ground2: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 40, backgroundColor: '#A5D6A7', opacity: 0.45 },
   scrollContent: { alignItems: 'center', paddingTop: 0, paddingHorizontal: 0, paddingBottom: 40, backgroundColor: '#FFF8F0' },
 
-  heroSection: { width: '100%', backgroundColor: '#FFF8F0', paddingHorizontal: 16, paddingTop: 56, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F0E8DC' },
+  heroSection: { width: '100%', backgroundColor: '#FFF8F0', paddingHorizontal: 16, paddingTop: 0, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F0E8DC' },
   heroTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   heroRight: { alignItems: 'flex-end', gap: 6 },
   weekBadge: { backgroundColor: '#F97316', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 4 },

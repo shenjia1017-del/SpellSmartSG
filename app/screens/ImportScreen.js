@@ -19,6 +19,7 @@ import {
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { extractTextFromPdfPage1Base64 } from '../../lib/pdfPage1Text';
 import { supabase } from '../../lib/supabase';
@@ -39,6 +40,7 @@ function guessImageMimeFromFileName(name) {
 export default function ImportScreen() {
   const router = useRouter();
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const { currentChild } = useChild();
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const [showManual, setShowManual] = useState(false);
@@ -870,7 +872,7 @@ export default function ImportScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <View style={styles.container}>
-        <View style={styles.pageHeader}>
+        <View style={[styles.pageHeader, { paddingTop: insets.top + 12 }]}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
             <Text style={styles.backBtnText}>←</Text>
           </TouchableOpacity>
@@ -1273,7 +1275,7 @@ const styles = StyleSheet.create({
   pageHeader: {
     backgroundColor: '#FFF8F0',
     paddingHorizontal: 16,
-    paddingTop: 56,
+    paddingTop: 0,
     paddingBottom: 14,
     borderBottomWidth: 1,
     borderBottomColor: '#F0E8DC',

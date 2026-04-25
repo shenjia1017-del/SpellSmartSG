@@ -2,6 +2,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import React, { useEffect } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useChild } from './lib/childContext';
 
@@ -13,6 +14,7 @@ function avatarForGender(gender) {
 
 export default function SelectChildScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { children, setCurrentChild, loading } = useChild();
 
   useEffect(() => {
@@ -22,7 +24,10 @@ export default function SelectChildScreen() {
   }, [children.length, loading, router]);
 
   return (
-    <LinearGradient colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']} style={styles.container}>
+    <LinearGradient
+      colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']}
+      style={[styles.container, { paddingTop: insets.top + 12 }]}
+    >
       <View style={styles.bgDecor} pointerEvents="none">
         <View style={[styles.cloud, { top: 38, left: 18, width: 80, height: 36 }]} />
         <View style={[styles.cloud, { top: 28, left: 55, width: 60, height: 28 }]} />
@@ -63,7 +68,7 @@ export default function SelectChildScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingTop: 72, paddingHorizontal: 18 },
+  container: { flex: 1, paddingTop: 0, paddingHorizontal: 18 },
   bgDecor: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
   cloud: { position: 'absolute', backgroundColor: 'white', borderRadius: 99, opacity: 0.85 },
   sun: { position: 'absolute', top: 32, right: 24, width: 28, height: 28, borderRadius: 14, backgroundColor: '#FFD740', opacity: 0.8 },

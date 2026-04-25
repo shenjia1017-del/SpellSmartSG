@@ -1,11 +1,13 @@
 import { useRouter } from 'expo-router';
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top + 12 }]}>
       <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
         <Text style={styles.backText}>← Back</Text>
       </TouchableOpacity>
@@ -19,7 +21,7 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF8F0', paddingTop: 64, paddingHorizontal: 16 },
+  container: { flex: 1, backgroundColor: '#FFF8F0', paddingTop: 0, paddingHorizontal: 16 },
   backBtn: { marginBottom: 16 },
   backText: { color: '#F97316', fontWeight: '700', fontSize: 16 },
   title: { fontSize: 24, fontWeight: '800', color: '#1A1A1A', marginBottom: 16 },

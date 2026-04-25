@@ -12,6 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useChild } from '../lib/childContext';
 
@@ -44,6 +45,7 @@ function GenderToggle({ value, onChange }) {
 
 export default function ChildrenSettingsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { children, addChild, updateChild, deleteChild, refreshChildren } = useChild();
   const [creating, setCreating] = useState(false);
   const [editingChild, setEditingChild] = useState(null);
@@ -82,7 +84,7 @@ export default function ChildrenSettingsScreen() {
 
   return (
     <LinearGradient colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']} style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <TouchableOpacity onPress={handleBack}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
@@ -187,7 +189,7 @@ export default function ChildrenSettingsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: { paddingTop: 56, paddingHorizontal: 16, marginBottom: 10 },
+  header: { paddingTop: 0, paddingHorizontal: 16, marginBottom: 10 },
   backText: { color: '#F97316', fontWeight: '700', fontSize: 16, marginBottom: 10 },
   title: { fontSize: 24, fontWeight: '900', color: '#1A1A1A' },
   subtitle: { fontSize: 13, color: '#666', marginTop: 4 },

@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../../lib/supabase';
 import { getWeekMastery, completeWeek } from '../lib/gardenHelpers';
 import WeekCompleteModal from '../components/WeekCompleteModal';
@@ -20,6 +21,7 @@ const STATUS_EMOJI = {
 
 export default function GardenScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { currentChild } = useChild();
   const [weekGroups, setWeekGroups] = useState([]);
   const [selectedWeek, setSelectedWeek] = useState('');
@@ -108,7 +110,10 @@ export default function GardenScreen() {
         <View style={styles.ground2} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + 12 }]}
+        showsVerticalScrollIndicator={false}
+      >
 
         <Text style={styles.title}>My Garden</Text>
 
@@ -207,7 +212,7 @@ const styles = StyleSheet.create({
   sun: { position: 'absolute', top: 32, right: 24, width: 28, height: 28, borderRadius: 14, backgroundColor: '#FFD740', opacity: 0.8 },
   ground: { position: 'absolute', bottom: 60, left: 0, right: 0, height: 60, backgroundColor: '#C8E6C9', borderTopLeftRadius: 80, borderTopRightRadius: 120, opacity: 0.5 },
   ground2: { position: 'absolute', bottom: 40, left: 0, right: 0, height: 40, backgroundColor: '#A5D6A7', opacity: 0.45 },
-  content: { paddingTop: 70, paddingHorizontal: 16, paddingBottom: 20 },
+  content: { paddingTop: 0, paddingHorizontal: 16, paddingBottom: 20 },
   title: { fontSize: 24, fontWeight: '800', color: '#1A237E', marginBottom: 16, textAlign: 'center' },
   weekTabs: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginBottom: 16 },
   weekTab: { backgroundColor: 'rgba(255,255,255,0.7)', borderRadius: 99, paddingHorizontal: 14, paddingVertical: 6, borderWidth: 1, borderColor: '#E0E0E0' },

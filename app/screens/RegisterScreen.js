@@ -2,11 +2,13 @@ import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { supabase } from '../../lib/supabase';
 
 export default function RegisterScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -48,7 +50,10 @@ export default function RegisterScreen() {
   };
 
   return (
-    <LinearGradient colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']} style={styles.container}>
+    <LinearGradient
+      colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']}
+      style={[styles.container, { paddingTop: insets.top + 12 }]}
+    >
       <View style={styles.bgDecor} pointerEvents="none">
         <View style={[styles.cloud, { top: 38, left: 18, width: 80, height: 36 }]} />
         <View style={[styles.cloud, { top: 28, left: 55, width: 60, height: 28 }]} />

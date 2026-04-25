@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const BLUE = '#378ADD';
 
@@ -26,6 +27,7 @@ function parseWrongWordsParam(params) {
 
 export default function ReviewScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
   const wrongWords = parseWrongWordsParam(params);
   const n = wrongWords.length;
@@ -37,7 +39,10 @@ export default function ReviewScreen() {
         <View style={[styles.cloud, { top: 28, left: 55, width: 60, height: 28 }]} />
         <View style={styles.sun} />
       </View>
-      <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 12 }]}
+        keyboardShouldPersistTaps="handled"
+      >
         <Text style={styles.title}>Review</Text>
         <Text style={styles.subtitle}>
           {n} wrong word{n === 1 ? '' : 's'}

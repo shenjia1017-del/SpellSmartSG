@@ -15,6 +15,8 @@ import {
   View
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import PrimaryButton from '../components/PrimaryButton';
+import { Colors, Radius, Spacing, FontSize } from '../lib/theme';
 
 import {
   fetchOpenAITtsAudio,
@@ -53,7 +55,7 @@ const SPELLING_PRAISE_POOL = [
 
 const getRandomPraise = (pool) => pool[Math.floor(Math.random() * pool.length)];
 
-const BLUE = '#F97316';
+const BLUE = Colors.primary;
 const GRAY = '#999';
 const GRAY_LIGHT = '#e8e8e8';
 const DARK_GRAY = '#444';
@@ -1111,13 +1113,19 @@ export default function PracticeScreen() {
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollInner} keyboardShouldPersistTaps="handled">
-        <TouchableOpacity style={styles.playBtn} onPress={() => playTts(practiceWord)} disabled={ttsBusy}>
-          {ttsBusy ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.playBtnText}>🔊 Play pronunciation</Text>
-          )}
-        </TouchableOpacity>
+        {tab === 'remember' && ttsBusy ? (
+          <View style={styles.playingStatus}>
+            <Text style={styles.playingStatusText}>🔊 PLAYING...</Text>
+          </View>
+        ) : (
+          <PrimaryButton
+            title="🔊  Play pronunciation"
+            onPress={() => playTts(practiceWord)}
+            variant="primary"
+            disabled={ttsBusy}
+            style={styles.playBtn3D}
+          />
+        )}
 
         <View style={styles.defBox}>
           {definitions.length === 0 ? (
@@ -1138,20 +1146,20 @@ export default function PracticeScreen() {
               <View
                 style={[
                   styles.lcwcPill,
-                  lcwcStage === 'look' ? styles.lcwcPillActive : lcwcStage !== 'look' ? styles.lcwcPillDone : null,
+                  lcwcStage === 'look' ? styles.lcwcPillActive : null,
                 ]}
               >
-                <Text style={[styles.lcwcPillText, (lcwcStage === 'look' || lcwcStage !== 'look') && styles.lcwcPillTextOn]}>
+                <Text style={[styles.lcwcPillText, lcwcStage === 'look' && styles.lcwcPillTextOn]}>
                   {lcwcStage === 'look' ? '👁 LOOK' : '👁 LOOK ✓'}
                 </Text>
               </View>
               <View
                 style={[
                   styles.lcwcPill,
-                  lcwcStage === 'write' ? styles.lcwcPillActive : lcwcStage === 'check' ? styles.lcwcPillDone : null,
+                  lcwcStage === 'write' ? styles.lcwcPillActive : null,
                 ]}
               >
-                <Text style={[styles.lcwcPillText, (lcwcStage === 'write' || lcwcStage === 'check') && styles.lcwcPillTextOn]}>
+                <Text style={[styles.lcwcPillText, lcwcStage === 'write' && styles.lcwcPillTextOn]}>
                   {lcwcStage === 'check' ? '✏️ WRITE ✓' : '✏️ WRITE'}
                 </Text>
               </View>
@@ -1283,13 +1291,12 @@ export default function PracticeScreen() {
                   </View>
                 </View>
 
-                <TouchableOpacity
-                  style={[styles.checkBtn, !hasRememberInput && styles.checkBtnOff]}
+                <PrimaryButton
+                  title="Check"
                   onPress={checkRemember}
+                  variant="primary"
                   disabled={!hasRememberInput}
-                >
-                  <Text style={[styles.checkBtnText, !hasRememberInput && styles.checkBtnTextOff]}>Check</Text>
-                </TouchableOpacity>
+                />
               </>
             ) : null}
 
@@ -1500,18 +1507,14 @@ export default function PracticeScreen() {
         ) : null}
 
         {showCheckButton ? (
-          <TouchableOpacity
-            style={[
-              styles.checkBtn,
-              !canCheckSp && styles.checkBtnOff,
-            ]}
+          <PrimaryButton
+            title="Check"
             onPress={() => {
               checkSpelling();
             }}
+            variant="primary"
             disabled={!canCheckSp}
-          >
-            <Text style={[styles.checkBtnText, !canCheckSp && styles.checkBtnTextOff]}>Check</Text>
-          </TouchableOpacity>
+          />
         ) : null}
       </ScrollView>
 
@@ -1578,7 +1581,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: BLUE,
     paddingTop: 0,
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingHorizontal: 8,
   },
   headerBack: {
@@ -1603,7 +1606,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     borderBottomWidth: 1,
     borderBottomColor: GRAY_LIGHT,
-    backgroundColor: '#FFF8F0',
+    backgroundColor: Colors.bgCream,
   },
   tabCell: {
     flex: 1,
@@ -1652,6 +1655,25 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
   },
+  playBtn3D: {
+    marginBottom: 8,
+  },
+  playingStatus: {
+    backgroundColor: Colors.primaryLight,
+    borderRadius: Radius.button,
+    paddingVertical: 14,
+    paddingHorizontal: Spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: Spacing.xs,
+    marginBottom: 8,
+  },
+  playingStatusText: {
+    color: Colors.primaryDark,
+    fontSize: FontSize.medium,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+  },
   defBox: {
     borderWidth: 1,
     borderColor: '#F0E8DC',
@@ -1687,38 +1709,41 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   lcwcPill: {
-    borderRadius: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: '#E0E0E0',
+    borderRadius: Radius.pill,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    backgroundColor: Colors.bgGray,
   },
   lcwcPillActive: {
-    backgroundColor: '#F97316',
-  },
-  lcwcPillDone: {
-    backgroundColor: '#22A050',
+    backgroundColor: Colors.textPrimary,
+    shadowColor: Colors.textPrimary,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 0,
+    elevation: 2,
   },
   lcwcPillText: {
-    fontSize: 11,
+    fontSize: FontSize.small,
     fontWeight: '700',
-    color: '#666',
+    color: Colors.textSecondary,
   },
   lcwcPillTextOn: {
-    color: '#fff',
+    color: Colors.bgWhite,
   },
   rememberWordCard: {
-    backgroundColor: '#F97316',
+    backgroundColor: Colors.primary,
     borderRadius: 14,
-    paddingVertical: 20,
+    paddingVertical: 24,
     paddingHorizontal: 16,
     alignItems: 'center',
     marginBottom: 8,
   },
   rememberWordCardText: {
-    color: 'white',
+    color: Colors.bgWhite,
     fontSize: 22,
     fontWeight: '900',
-    letterSpacing: 1,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
   },
   rememberTimerTrack: {
     height: 4,
@@ -2237,15 +2262,15 @@ const styles = StyleSheet.create({
   },
   skipBtn: {
     borderWidth: 2,
-    borderColor: '#F0E8DC',
-    borderRadius: 12,
+    borderColor: Colors.border,
+    borderRadius: Radius.medium,
     paddingVertical: 14,
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.88)',
+    backgroundColor: Colors.bgWhite,
   },
   skipBtnText: {
-    color: '#999',
-    fontSize: 15,
+    color: Colors.textSecondary,
+    fontSize: FontSize.medium,
     fontWeight: '700',
   },
   completionOverlay: {

@@ -2,25 +2,78 @@ import { useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Haptics from 'expo-haptics';
 import { supabase } from '../../lib/supabase';
 import { completeWeek } from '../lib/gardenHelpers';
 import WeekCompleteModal from '../components/WeekCompleteModal';
 import LottieView from 'lottie-react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useChild } from '../lib/childContext';
+import { Colors, Spacing, Radius, FontSize, Shadow } from '../lib/theme';
 
 function isValidWeekLabel(wl) {
   return wl != null && String(wl).trim() !== '';
+}
+
+function StepButton3D({ onPress, disabled = false, shadowColor, shadowRadius = Radius.button, style, children }) {
+  const translateY = React.useRef(new Animated.Value(0)).current;
+
+  const onPressIn = () => {
+    if (disabled) return;
+    if (Platform.OS === 'ios') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+    Animated.timing(translateY, {
+      toValue: 5,
+      duration: 80,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const onPressOut = () => {
+    if (disabled) return;
+    Animated.timing(translateY, {
+      toValue: 0,
+      duration: 80,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  return (
+    <TouchableWithoutFeedback
+      onPress={disabled ? undefined : onPress}
+      onPressIn={onPressIn}
+      onPressOut={onPressOut}
+    >
+      <View style={[style, styles.step3DHost]}>
+        {!disabled ? (
+          <View
+            style={[
+              styles.stepShadowBase,
+              {
+                backgroundColor: shadowColor ?? Colors.primaryDark,
+                borderRadius: shadowRadius,
+              },
+            ]}
+          />
+        ) : null}
+        <Animated.View style={{ transform: [{ translateY }] }}>{children}</Animated.View>
+      </View>
+    </TouchableWithoutFeedback>
+  );
 }
 
 export default function HomeScreen() {
@@ -337,31 +390,32 @@ export default function HomeScreen() {
         ) : null}
 
         <View style={styles.stepsContainer}>
-          <TouchableOpacity
-            style={[styles.stepRow, totalCount > 0 && styles.stepRowDone]}
+          <StepButton3D
+            style={styles.step3DWrap}
             onPress={() => router.push('/import')}
+            disabled={false}
+            shadowColor={totalCount > 0 ? Colors.successDark : Colors.primaryDark}
+            shadowRadius={Radius.button}
           >
-            <View style={[styles.stepNum, totalCount > 0 && styles.stepNumDone]}>
-              <Text style={[styles.stepNumText, totalCount > 0 && styles.stepNumTextDone]}>
-                {totalCount > 0 ? '✓' : '1'}
-              </Text>
+            <View style={[styles.stepRow, totalCount > 0 && styles.stepRowDone]}>
+              <View style={[styles.stepNum, totalCount > 0 && styles.stepNumDone]}>
+                <Text style={[styles.stepNumText, totalCount > 0 && styles.stepNumTextDone]}>
+                  {totalCount > 0 ? '✓' : '1'}
+                </Text>
+              </View>
+              <Text style={styles.stepIcon}>📷</Text>
+              <View style={styles.stepContent}>
+                <Text style={styles.stepLabel}>STEP 1</Text>
+                <Text style={[styles.stepTitle, totalCount > 0 && styles.stepTitleDone]}>
+                  Import / Scan Word List
+                </Text>
+              </View>
+              {totalCount > 0 && <Text style={styles.stepDoneText}>Done</Text>}
             </View>
-            <Text style={styles.stepIcon}>📷</Text>
-            <View style={styles.stepContent}>
-              <Text style={styles.stepLabel}>STEP 1</Text>
-              <Text style={[styles.stepTitle, totalCount > 0 && styles.stepTitleDone]}>
-                Import / Scan Word List
-              </Text>
-            </View>
-            {totalCount > 0 && <Text style={styles.stepDoneText}>Done</Text>}
-          </TouchableOpacity>
+          </StepButton3D>
 
-          <TouchableOpacity
-            style={[
-              styles.stepMain,
-              (!selectedWeek || !selectedGroup || selectedGroup.words.length === 0)
-                && styles.stepMainDisabled,
-            ]}
+          <StepButton3D
+            style={styles.step3DWrap}
             onPress={() => {
               const selectedWords = selectedGroup?.words ?? [];
               router.push({
@@ -373,26 +427,42 @@ export default function HomeScreen() {
               });
             }}
             disabled={!selectedWeek || !selectedGroup || selectedGroup.words.length === 0}
+            shadowColor={Colors.primaryDark}
+            shadowRadius={Radius.large}
           >
-            <Text style={styles.stepMainLabel}>STEP 2</Text>
-            <Text style={styles.stepMainTitle}>▶  Start Learning</Text>
-          </TouchableOpacity>
+            <View
+              style={[
+                styles.stepMain,
+                (!selectedWeek || !selectedGroup || selectedGroup.words.length === 0)
+                  && styles.stepMainDisabled,
+              ]}
+            >
+              <Text style={styles.stepMainLabel}>STEP 2</Text>
+              <Text style={styles.stepMainTitle}>▶  Start Learning</Text>
+            </View>
+          </StepButton3D>
 
-          <TouchableOpacity
-            style={[
-              styles.stepSecondary,
-              (!selectedWeek || !selectedGroup || selectedGroup.words.length === 0)
-                && styles.stepSecondaryDisabled,
-            ]}
+          <StepButton3D
+            style={styles.step3DWrap}
             onPress={() => {
               const weekLabel = selectedGroup?.weekLabel ?? '';
               router.push({ pathname: '/dictation', params: { weekLabel } });
             }}
             disabled={!selectedWeek || !selectedGroup || selectedGroup.words.length === 0}
+            shadowColor={Colors.primaryDark}
+            shadowRadius={Radius.large}
           >
-            <Text style={styles.stepLabel}>STEP 3</Text>
-            <Text style={styles.stepSecondaryTitle}>🎤  Dictation Test</Text>
-          </TouchableOpacity>
+            <View
+              style={[
+                styles.stepSecondary,
+                (!selectedWeek || !selectedGroup || selectedGroup.words.length === 0)
+                  && styles.stepSecondaryDisabled,
+              ]}
+            >
+              <Text style={styles.stepLabel}>STEP 3</Text>
+              <Text style={styles.stepSecondaryTitle}>🎤  Dictation Test</Text>
+            </View>
+          </StepButton3D>
         </View>
 
         <View style={styles.weekSection}>
@@ -549,25 +619,62 @@ const styles = StyleSheet.create({
   flowerEmoji: { fontSize: 18 },
 
   stepsContainer: { width: '100%', maxWidth: 420, alignSelf: 'center', paddingHorizontal: 14, marginBottom: 20, marginTop: 4 },
-  stepRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 14, padding: 12, marginBottom: 7, backgroundColor: 'white', borderWidth: 1.5, borderColor: '#F0E8DC', gap: 10 },
-  stepRowDone: { backgroundColor: '#F9FFF9', borderColor: '#C8EDD0' },
+  step3DHost: { overflow: 'visible' },
+  step3DWrap: { marginBottom: Spacing.sm, paddingBottom: 5 },
+  stepShadowBase: {
+    position: 'absolute',
+    top: 5,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: Radius.button,
+    padding: Spacing.md,
+    backgroundColor: Colors.bgWhite,
+    borderWidth: 1.5,
+    borderColor: Colors.borderLight,
+    gap: Spacing.sm,
+  },
+  stepRowDone: { backgroundColor: Colors.successBg, borderColor: Colors.success },
   stepNum: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#F0E8DC', alignItems: 'center', justifyContent: 'center' },
-  stepNumDone: { backgroundColor: '#C8EDD0' },
+  stepNumDone: { backgroundColor: Colors.success },
   stepNumText: { fontSize: 10, fontWeight: '800', color: '#C45A10' },
-  stepNumTextDone: { color: '#22A050' },
+  stepNumTextDone: { color: Colors.bgWhite },
   stepIcon: { fontSize: 18 },
   stepContent: { flex: 1 },
   stepLabel: { fontSize: 8, fontWeight: '700', color: '#bbb', letterSpacing: 0.5, marginBottom: 1 },
   stepTitle: { fontSize: 13, fontWeight: '700', color: '#222' },
   stepTitleDone: { color: '#888' },
-  stepDoneText: { fontSize: 11, color: '#22A050', fontWeight: '700' },
-  stepMain: { width: '100%', backgroundColor: '#F97316', borderRadius: 16, paddingVertical: 15, alignItems: 'center', marginBottom: 7, shadowColor: '#F97316', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 4 },
+  stepDoneText: { fontSize: 11, color: Colors.successDark, fontWeight: '700' },
+  stepMain: {
+    width: '100%',
+    backgroundColor: Colors.primary,
+    borderRadius: Radius.large,
+    paddingVertical: 15,
+    alignItems: 'center',
+    ...Shadow.card,
+  },
   stepMainDisabled: { backgroundColor: '#E0E0E0', shadowOpacity: 0, elevation: 0 },
   stepMainLabel: { fontSize: 8, fontWeight: '700', color: 'rgba(255,255,255,0.7)', letterSpacing: 0.5, marginBottom: 2 },
-  stepMainTitle: { fontSize: 15, fontWeight: '800', color: 'white' },
-  stepSecondary: { width: '100%', backgroundColor: 'white', borderRadius: 16, paddingVertical: 13, alignItems: 'center', marginBottom: 7, borderWidth: 1.5, borderColor: '#F97316' },
-  stepSecondaryDisabled: { borderColor: '#E0E0E0', opacity: 0.5 },
-  stepSecondaryTitle: { fontSize: 14, fontWeight: '700', color: '#E65100' },
+  stepMainTitle: { fontSize: FontSize.large, fontWeight: '800', color: Colors.bgWhite },
+  stepSecondary: {
+    width: '100%',
+    backgroundColor: Colors.bgWhite,
+    borderRadius: Radius.large,
+    paddingVertical: 13,
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+  },
+  stepSecondaryDisabled: {
+    borderColor: Colors.primary,
+    backgroundColor: Colors.primaryLight,
+    opacity: 1,
+  },
+  stepSecondaryTitle: { fontSize: 14, fontWeight: '700', color: Colors.primaryDark },
 
   weekSection: { width: '100%', maxWidth: 420, alignSelf: 'center', paddingHorizontal: 14, marginBottom: 12 },
   weekSectionTitle: { fontSize: 9, fontWeight: '700', color: '#bbb', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 },

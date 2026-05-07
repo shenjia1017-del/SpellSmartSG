@@ -75,7 +75,7 @@ export default function LoginScreen() {
 
   return (
     <LinearGradient
-      colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']}
+      colors={['#FFF4E8', '#FFF8F0', '#FFFBF5']}
       style={[styles.container, { paddingTop: insets.top + 12 }]}
     >
       <View style={styles.bgDecor} pointerEvents="none">
@@ -147,7 +147,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#4A90E2',
+    color: '#FF7B1C',
     marginBottom: 10,
   },
   subtitle: {
@@ -194,7 +194,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   linkText: {
-    color: '#4A90E2',
+    color: '#FF7B1C',
     fontSize: 14,
     fontWeight: '600',
   },

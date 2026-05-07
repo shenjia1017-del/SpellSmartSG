@@ -46,7 +46,7 @@ const FILLIN_PRAISE_POOL = [
 ];
 
 const SPELLING_PRAISE_POOL = [
-  'Perfect spelling!', 'Spelled it!', 'You nailed it!', 'Champion!',
+  'Perfect spelling!', 'Spelled it!', 'You nailed it!', 'Champion!', 'Six seven! You nailed it! 🔥',
   'Amazing!', "You're on fire!", 'Spelling star!', 'Super!',
   'Letter perfect!', 'Wordsmith!', 'Every letter right!', 'Pro speller!',
   'Bravo!', 'Spell master!', 'Flawless!', 'Top speller!',

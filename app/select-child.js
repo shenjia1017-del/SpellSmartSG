@@ -25,7 +25,7 @@ export default function SelectChildScreen() {
 
   return (
     <LinearGradient
-      colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']}
+      colors={['#FFF4E8', '#FFF8F0', '#FFFBF5']}
       style={[styles.container, { paddingTop: insets.top + 12 }]}
     >
       <View style={styles.bgDecor} pointerEvents="none">

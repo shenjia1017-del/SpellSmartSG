@@ -83,7 +83,7 @@ export default function ChildrenSettingsScreen() {
   };
 
   return (
-    <LinearGradient colors={['#E3F2FD', '#F1F8FF', '#FFF8F0']} style={styles.container}>
+    <LinearGradient colors={['#FFF4E8', '#FFF8F0', '#FFFBF5']} style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
         <TouchableOpacity onPress={handleBack}>
           <Text style={styles.backText}>← Back</Text>

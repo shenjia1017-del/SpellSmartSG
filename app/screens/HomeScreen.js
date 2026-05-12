@@ -327,12 +327,14 @@ export default function HomeScreen() {
             </View>
           </View>
           <View style={styles.mascotRow}>
-            <LottieView
-              source={require('../../assets/animations/Trilo-5-animated.json')}
-              autoPlay
-              loop
-              style={styles.mascot}
-            />
+            <View style={styles.mascotContainer}>
+              <LottieView
+                source={require('../../assets/animations/Trilo-5-animated.json')}
+                autoPlay
+                loop
+                style={styles.mascot}
+              />
+            </View>
             <View style={styles.speechBubble}>
               <Text style={styles.speechMain}>Ready to learn? 💪</Text>
               <Text style={styles.speechSub}>
@@ -601,6 +603,12 @@ const styles = StyleSheet.create({
   childSwitchAvatar: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   childSwitchName: { fontSize: 12, color: '#333', fontWeight: '700' },
   mascotRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  mascotContainer: {
+    alignItems: 'center',
+    marginBottom: 4,
+    overflow: 'visible',
+    paddingBottom: 20,
+  },
   mascot: { width: 110, height: 110 },
   speechBubble: { flex: 1, backgroundColor: 'white', borderRadius: 16, borderWidth: 1.5, borderColor: '#F0E0CC', padding: 10 },
   speechMain: { fontSize: 13, fontWeight: '700', color: '#1A1A1A' },

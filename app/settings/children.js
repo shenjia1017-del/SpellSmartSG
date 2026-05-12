@@ -144,6 +144,9 @@ export default function ChildrenSettingsScreen() {
                   else if (editingChild?.id) await updateChild(editingChild.id, name, gender);
                   await refreshChildren();
                   closeModal();
+                  if (creating) {
+                    router.push({ pathname: '/welcome', params: { childName: name } });
+                  }
                 } catch (e) {
                   Alert.alert('Error', e?.message ?? 'Failed to save child.');
                   setBusy(false);

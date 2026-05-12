@@ -20,12 +20,15 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import LottieView from 'lottie-react-native';
 
 import { extractTextFromPdfPage1Base64 } from '../../lib/pdfPage1Text';
 import { supabase } from '../../lib/supabase';
 import { useChild } from '../lib/childContext';
 
 const OCR_MIN_INTERVAL_MS = 2000;
+
+const EXTRACTING_BUBBLE_PHRASES = ['A  B  C', 'D  E  F', 'G  H  I', 'hmm...', 'J  K  L', 'zzz...', 'M  N  O'];
 
 function guessImageMimeFromFileName(name) {
   const n = String(name ?? '').toLowerCase();
@@ -67,11 +70,24 @@ export default function ImportScreen() {
   const [showAddPagesModal, setShowAddPagesModal] = useState(false);
   const [pagesCountForCurrentWeek, setPagesCountForCurrentWeek] = useState(0);
 
+  const [bubblePhrase, setBubblePhrase] = useState('A  B  C');
+
   const openAIApiKey = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
   const lastOcrAtRef = useRef(0);
   const scrollViewRef = useRef(null);
   const scrollToReviewPendingRef = useRef(false);
   const pageCountWeekRef = useRef(null);
+
+  useEffect(() => {
+    if (!isExtracting) return;
+    setBubblePhrase(EXTRACTING_BUBBLE_PHRASES[0]);
+    let i = 0;
+    const timer = setInterval(() => {
+      i = (i + 1) % EXTRACTING_BUBBLE_PHRASES.length;
+      setBubblePhrase(EXTRACTING_BUBBLE_PHRASES[i]);
+    }, 1200);
+    return () => clearInterval(timer);
+  }, [isExtracting]);
 
   const scheduleScrollToReviewSection = () => {
     scrollToReviewPendingRef.current = true;
@@ -929,13 +945,6 @@ export default function ImportScreen() {
             <Text style={styles.importArrow}>›</Text>
           </TouchableOpacity>
 
-      {isExtracting ? (
-        <View style={styles.processingBox}>
-          <ActivityIndicator />
-          <Text style={styles.processingText}>Extracting spelling list and dictation passage...</Text>
-        </View>
-      ) : null}
-
       {photoUri ? (
         <Image source={{ uri: photoUri }} style={styles.previewImage} />
       ) : null}
@@ -1232,6 +1241,25 @@ export default function ImportScreen() {
             </TouchableOpacity>
           </View>
         ) : null}
+
+        {isExtracting ? (
+          <View style={styles.extractingOverlay}>
+            <View style={styles.bubbleContainer}>
+              <View style={styles.speechBubble}>
+                <Text style={styles.bubbleText}>{bubblePhrase}</Text>
+              </View>
+              <View style={styles.bubbleTail} />
+            </View>
+            <LottieView
+              source={require('../../assets/animations/Trilo-meditation.json')}
+              autoPlay
+              loop
+              style={{ width: 180, height: 180 }}
+            />
+            <Text style={styles.extractingOverlayTitle}>Bloom is reading your word list...</Text>
+            <Text style={styles.extractingOverlaySub}>This usually takes 5-10 seconds</Text>
+          </View>
+        ) : null}
       </View>
 
       <Modal
@@ -1502,14 +1530,59 @@ const styles = StyleSheet.create({
     color: '#555',
     fontWeight: '600',
   },
-  processingBox: {
-    marginTop: 10,
+  extractingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#FFFBF5',
+    zIndex: 999,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  processingText: {
+  extractingOverlayTitle: {
+    color: '#B0917A',
+    fontSize: 16,
+    textAlign: 'center',
+    marginTop: 16,
+    paddingHorizontal: 24,
+  },
+  extractingOverlaySub: {
+    color: '#C8B4A0',
+    fontSize: 13,
+    textAlign: 'center',
     marginTop: 8,
-    color: '#555',
+    paddingHorizontal: 24,
+  },
+  bubbleContainer: {
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  speechBubble: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderWidth: 1.5,
+    borderColor: '#E0D8CC',
+  },
+  bubbleText: {
+    fontSize: 22,
+    fontWeight: '600',
+    color: '#FF7B1C',
+    letterSpacing: 6,
+  },
+  bubbleTail: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 8,
+    borderRightWidth: 8,
+    borderTopWidth: 10,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderTopColor: 'white',
+    marginTop: -1,
   },
   previewImage: {
     width: '100%',

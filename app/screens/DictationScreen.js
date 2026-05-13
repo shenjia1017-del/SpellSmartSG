@@ -937,6 +937,7 @@ export default function DictationScreen() {
               onChangeText={setInputText}
               autoCapitalize="none"
               autoCorrect={false}
+              spellCheck={false}
               multiline={phase === 'sentencesTypeActive'}
             />
 

@@ -90,6 +90,7 @@ export default function HomeScreen() {
   const [modalCreature, setModalCreature] = useState(null);
   const [modalTotalFlowers, setModalTotalFlowers] = useState(0);
   const [childMenuVisible, setChildMenuVisible] = useState(false);
+  const [isJumping, setIsJumping] = useState(false);
 
   useEffect(() => {
     if (!currentChild && children.length > 0) {
@@ -328,12 +329,28 @@ export default function HomeScreen() {
           </View>
           <View style={styles.mascotRow}>
             <View style={styles.mascotContainer}>
-              <LottieView
-                source={require('../../assets/animations/Trilo-5-animated.json')}
-                autoPlay
-                loop
-                style={styles.mascot}
-              />
+              <Pressable
+                onPress={() => {
+                  setIsJumping(true);
+                  if (Platform.OS === 'ios') {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  }
+                }}
+              >
+                <LottieView
+                  source={
+                    isJumping
+                      ? require('../../assets/animations/Trilo-jump.json')
+                      : require('../../assets/animations/Trilo-wave.json')
+                  }
+                  autoPlay
+                  loop={!isJumping}
+                  onAnimationFinish={() => {
+                    if (isJumping) setIsJumping(false);
+                  }}
+                  style={styles.mascot}
+                />
+              </Pressable>
             </View>
             <View style={styles.speechBubble}>
               <Text style={styles.speechMain}>Ready to learn? 💪</Text>

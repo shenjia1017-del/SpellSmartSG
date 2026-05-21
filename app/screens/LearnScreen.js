@@ -3,6 +3,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,6 +20,8 @@ import { useChild } from '../lib/childContext';
 
 const CLAUDE_MIN_INTERVAL_MS = 2000;
 const TTS_MIN_INTERVAL_MS = 800;
+const EASTER_EGG_RATE_MONSTER = 0.55;
+const EASTER_EGG_RATE_FAIRY = 1.9;
 
 const CLAUDE_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -402,6 +405,8 @@ export default function LearnScreen() {
 
   const cacheRef = useRef(new Map());
   const soundRef = useRef(null);
+  const cachedTtsUriRef = useRef(null);
+  const cachedTtsWordRef = useRef(null);
   const lastClaudeAt = useRef(0);
   const lastTtsAt = useRef(0);
 
@@ -436,6 +441,12 @@ export default function LearnScreen() {
       unloadSound();
     };
   }, [unloadSound]);
+
+  useEffect(() => {
+    cachedTtsUriRef.current = null;
+    cachedTtsWordRef.current = null;
+    void unloadSound();
+  }, [currentWord, unloadSound]);
 
   useFocusEffect(
     useCallback(() => {
@@ -706,14 +717,7 @@ export default function LearnScreen() {
     };
   }, [currentWord, userId, index, words]);
 
-  const playOpenAiTts = async (text, ttsOptions = {}) => {
-    await unloadSound();
-    await Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: false,
-    });
-
-    lastTtsAt.current = Date.now();
+  const writeTtsToCache = async (text, ttsOptions = {}) => {
     const base64 = await fetchOpenAITtsAudio(text, ttsOptions);
     const dir = FileSystem.cacheDirectory;
     if (!dir) {
@@ -723,15 +727,97 @@ export default function LearnScreen() {
     await FileSystem.writeAsStringAsync(fileUri, base64, {
       encoding: FileSystem.EncodingType.Base64,
     });
+    cachedTtsUriRef.current = fileUri;
+    cachedTtsWordRef.current = text;
+    return fileUri;
+  };
+
+  const playOpenAiTts = async (text, ttsOptions = {}) => {
+    await unloadSound();
+    await Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+    });
+
+    lastTtsAt.current = Date.now();
+    const fileUri = await writeTtsToCache(text, ttsOptions);
 
     const { sound } = await Audio.Sound.createAsync({ uri: fileUri });
     soundRef.current = sound;
+    await sound.setRateAsync(1.0, false);
     sound.setOnPlaybackStatusUpdate((status) => {
       if (status.isLoaded && status.didJustFinish) {
         setPlaying(false);
       }
     });
     await sound.playAsync();
+  };
+
+  const ensureSoundForEasterEgg = async () => {
+    if (!currentWord) {
+      throw new Error('No word to play.');
+    }
+    await Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: false,
+    });
+
+    if (soundRef.current) {
+      try {
+        const status = await soundRef.current.getStatusAsync();
+        if (status.isLoaded && cachedTtsWordRef.current === currentWord) {
+          return soundRef.current;
+        }
+      } catch {
+        // fall through to reload
+      }
+      await unloadSound();
+    }
+
+    if (cachedTtsUriRef.current && cachedTtsWordRef.current === currentWord) {
+      const { sound } = await Audio.Sound.createAsync({ uri: cachedTtsUriRef.current });
+      soundRef.current = sound;
+      await sound.setRateAsync(1.0, false);
+      return sound;
+    }
+
+    lastTtsAt.current = Date.now();
+    const fileUri = await writeTtsToCache(currentWord, {});
+    const { sound } = await Audio.Sound.createAsync({ uri: fileUri });
+    soundRef.current = sound;
+    await sound.setRateAsync(1.0, false);
+    return sound;
+  };
+
+  const onPlayEasterEgg = async (rate) => {
+    if (!currentWord || loadingCard) return;
+
+    const now = Date.now();
+    const wait = TTS_MIN_INTERVAL_MS - (now - lastTtsAt.current);
+    if (wait > 0) {
+      await new Promise((r) => setTimeout(r, wait));
+    }
+
+    setErrorMsg(null);
+    setPlaying(false);
+    try {
+      const sound = await ensureSoundForEasterEgg();
+      try {
+        await sound.stopAsync();
+      } catch {
+        // ignore if not playing
+      }
+      await sound.setPositionAsync(0);
+      await sound.setRateAsync(rate, false);
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          sound.setRateAsync(1.0, false).catch(() => {});
+        }
+      });
+      await sound.playAsync();
+    } catch (e) {
+      setErrorMsg(e?.message ?? 'Could not play audio.');
+    }
   };
 
   const onPlayPronunciation = async () => {
@@ -856,6 +942,36 @@ export default function LearnScreen() {
                 <Text style={styles.pronunciationBtnText}>🔊  Pronunciation</Text>
               )}
             </TouchableOpacity>
+
+            <View style={styles.easterRow}>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.easterPill,
+                  pressed && styles.easterPillPressed,
+                ]}
+                onPress={() => onPlayEasterEgg(EASTER_EGG_RATE_MONSTER)}
+                disabled={loadingCard}
+              >
+                <View style={styles.easterPillInner}>
+                  <Text style={styles.easterEmoji}>👹</Text>
+                  <Text style={styles.easterPillText}>Monster</Text>
+                </View>
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.easterPill,
+                  pressed && styles.easterPillPressed,
+                ]}
+                onPress={() => onPlayEasterEgg(EASTER_EGG_RATE_FAIRY)}
+                disabled={loadingCard}
+              >
+                <View style={styles.easterPillInner}>
+                  <Text style={styles.easterEmoji}>🧚</Text>
+                  <Text style={styles.easterPillText}>Fairy</Text>
+                </View>
+              </Pressable>
+            </View>
+            <Text style={styles.easterHint}>TAP FOR FUN VOICES</Text>
           </View>
 
           {loadingCard ? (
@@ -990,6 +1106,40 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   pronunciationBtnText: { fontSize: 13, fontWeight: '700', color: 'white' },
+  easterRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 12,
+  },
+  easterPill: {
+    backgroundColor: 'white',
+    borderWidth: 1.5,
+    borderColor: '#F5E6D8',
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+  },
+  easterPillPressed: {
+    transform: [{ translateY: 2 }],
+  },
+  easterPillInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  easterEmoji: { fontSize: 15 },
+  easterPillText: { fontSize: 13, fontWeight: '600', color: '#6B4E36' },
+  easterHint: {
+    marginTop: 8,
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#B89878',
+    letterSpacing: 0.5,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+  },
   section: { padding: 14, borderBottomWidth: 1, borderBottomColor: '#F5F0EA' },
   sectionTitle: { fontSize: 9, fontWeight: '700', color: '#F97316', letterSpacing: 1, marginBottom: 6 },
   sectionText: { fontSize: 14, color: '#333', lineHeight: 22 },

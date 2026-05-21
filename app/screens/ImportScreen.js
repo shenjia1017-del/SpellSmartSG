@@ -30,6 +30,16 @@ const OCR_MIN_INTERVAL_MS = 2000;
 
 const EXTRACTING_BUBBLE_PHRASES = ['A  B  C', 'D  E  F', 'G  H  I', 'hmm...', 'J  K  L', 'zzz...', 'M  N  O'];
 
+const WEEK_LABEL_PREFILL = 'Week ';
+
+function isWeekLabelValidForSave(value) {
+  const raw = String(value ?? '');
+  const trimmed = raw.trim();
+  if (!trimmed) return false;
+  if (raw === 'Week ' || trimmed === 'Week') return false;
+  return true;
+}
+
 function guessImageMimeFromFileName(name) {
   const n = String(name ?? '').toLowerCase();
   if (n.endsWith('.png')) return 'image/png';
@@ -65,7 +75,7 @@ export default function ImportScreen() {
   const [editingWeekGroupLabel, setEditingWeekGroupLabel] = useState('');
   const [manualWordToAdd, setManualWordToAdd] = useState('');
   const [weekLabel, setWeekLabel] = useState('');
-  const [existingWeekLabels, setExistingWeekLabels] = useState([]);
+  const [weekLabelSelection, setWeekLabelSelection] = useState(undefined);
   const [saveSuccess, setSaveSuccess] = useState(null);
   const [showAddPagesModal, setShowAddPagesModal] = useState(false);
   const [pagesCountForCurrentWeek, setPagesCountForCurrentWeek] = useState(0);
@@ -77,6 +87,8 @@ export default function ImportScreen() {
   const scrollViewRef = useRef(null);
   const scrollToReviewPendingRef = useRef(false);
   const pageCountWeekRef = useRef(null);
+  const weekLabelInputRef = useRef(null);
+  const weekLabelPrefillAppliedRef = useRef(false);
 
   useEffect(() => {
     if (!isExtracting) return;
@@ -254,37 +266,6 @@ export default function ImportScreen() {
       setErrorMsg(e?.message ?? 'Failed to load words.');
     } finally {
       setLoadingWords(false);
-    }
-  };
-
-  const loadExistingWeekLabels = async () => {
-    try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const userId = sessionData?.session?.user?.id;
-      if (!userId) {
-        setExistingWeekLabels([]);
-        return;
-      }
-      const { data, error } = await supabase
-        .from('words')
-        .select('week_label')
-        .eq('user_id', userId)
-        .eq('child_id', currentChild?.id ?? '')
-        .not('week_label', 'is', null);
-      if (error) throw error;
-      const seen = new Set();
-      const labels = [];
-      for (const row of Array.isArray(data) ? data : []) {
-        const label = String(row?.week_label ?? '').trim();
-        if (!label) continue;
-        const key = label.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        labels.push(label);
-      }
-      setExistingWeekLabels(labels);
-    } catch {
-      setExistingWeekLabels([]);
     }
   };
 
@@ -649,12 +630,9 @@ export default function ImportScreen() {
 
   const onSaveOcrReview = async () => {
     Keyboard.dismiss();
+    if (!isWeekLabelValidForSave(weekLabel)) return;
     const wl = weekLabel.trim();
     setSaveSuccess(null);
-    if (!wl) {
-      setErrorMsg('Please enter a week label (e.g. Week 5).');
-      return;
-    }
 
     const confirmedWords = normalizeWords(extractedWords);
     /** Full dictation text comes from state `extractedPassage` (multiline input). */
@@ -812,7 +790,11 @@ export default function ImportScreen() {
       extractedWeekGroups.length > 0 ||
       showManual;
     if (!hasReviewData) return;
-    loadExistingWeekLabels();
+    if (weekLabelPrefillAppliedRef.current) return;
+    setWeekLabel(WEEK_LABEL_PREFILL);
+    weekLabelPrefillAppliedRef.current = true;
+    const cursor = WEEK_LABEL_PREFILL.length;
+    setWeekLabelSelection({ start: cursor, end: cursor });
   }, [extractedWords.length, extractedPassage, extractedWeekGroups.length, showManual]);
 
   const onSaveWord = async () => {
@@ -857,6 +839,8 @@ export default function ImportScreen() {
   const onAddPagesModalAddAnother = () => {
     setShowAddPagesModal(false);
     scrollToReviewPendingRef.current = false;
+    weekLabelPrefillAppliedRef.current = false;
+    setWeekLabelSelection(undefined);
     setSaveSuccess(null);
     setShowManual(false);
     setWordInput('');
@@ -961,40 +945,16 @@ export default function ImportScreen() {
           <Text style={styles.manualTitle}>Review before saving</Text>
 
           <Text style={styles.sectionLabel}>Week label</Text>
-          {existingWeekLabels.length > 0 ? (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.weekChipsRow}
-              contentContainerStyle={styles.weekChipsContent}
-              keyboardShouldPersistTaps="handled"
-            >
-              {existingWeekLabels.map((label) => (
-                <TouchableOpacity
-                  key={`week-chip-${label}`}
-                  style={[
-                    styles.weekChip,
-                    weekLabel.trim().toLowerCase() === label.toLowerCase() && styles.weekChipActive,
-                  ]}
-                  onPress={() => setWeekLabel(label)}
-                >
-                  <Text
-                    style={[
-                      styles.weekChipText,
-                      weekLabel.trim().toLowerCase() === label.toLowerCase() && styles.weekChipTextActive,
-                    ]}
-                  >
-                    {label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          ) : null}
           <TextInput
+            ref={weekLabelInputRef}
             style={styles.input}
             value={weekLabel}
-            placeholder="e.g. Week 5, Term 2"
-            onChangeText={setWeekLabel}
+            placeholder="Week 5"
+            selection={weekLabelSelection}
+            onChangeText={(text) => {
+              setWeekLabel(text);
+              if (weekLabelSelection) setWeekLabelSelection(undefined);
+            }}
           />
 
           <Text style={styles.sectionLabel}>Spelling words & phrases</Text>
@@ -1123,7 +1083,11 @@ export default function ImportScreen() {
 
           {errorMsg ? <Text style={styles.errorText}>{errorMsg}</Text> : null}
 
-          <TouchableOpacity style={styles.saveButton} onPress={onSaveOcrReview} disabled={saving}>
+          <TouchableOpacity
+            style={styles.saveButton}
+            onPress={onSaveOcrReview}
+            disabled={saving || !isWeekLabelValidForSave(weekLabel)}
+          >
             {saving ? (
               <ActivityIndicator color="#fff" />
             ) : (
